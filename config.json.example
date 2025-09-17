@@ -1,0 +1,17 @@
+{
+  "discord_token": "",
+  "main_db_path": "/home/user/jka-server-root/taystjk/data.db",
+  "log_file_path": "/home/user/jka-server-root/logs/jka-server.log",
+  "bot_db_path": "./bot_data.db",
+  "admin_role": "Admin",
+  "update_interval": 300,
+  "log_level": "minimal",
+  "announcement_channel_id": null,
+  "show_times_expired": true,
+  "courses_per_row": 3,
+  "message_toggles": {
+    "season_summary": true,
+    "season_standings": true,
+    "course_grid": true
+  }
+}
