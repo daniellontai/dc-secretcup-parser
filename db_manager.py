@@ -41,7 +41,7 @@ class DatabaseManager:
                         id INTEGER PRIMARY KEY,
                         season_id INTEGER,
                         course_name TEXT,
-                        full_course_name TEXT,
+                        full_course_name TEXT UNIQUE,
                         secret_until INTEGER,
                         expired BOOLEAN DEFAULT FALSE,
                         final_standings TEXT,
@@ -163,6 +163,23 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error adding season course: {e}")
             raise
+
+    async def remove_season_course(self, season_id: int, full_course_name: str):
+        """Remove a course from specified season"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                await db.execute("""
+                    DELETE FROM season_courses 
+                    WHERE season_id = ? AND full_course_name = ?
+                """, (season_id, full_course_name))
+                
+                await db.commit()
+                logger.info(f"Removed course {full_course_name} from season {season_id}")
+        except Exception as e:
+            logger.error(f"Error removing season course: {e}")
+            raise
+            
+
     
     async def expire_course(self, full_course_name: str, standings_data: Dict):
         """Mark a course as expired and store final standings"""
@@ -258,28 +275,77 @@ class DatabaseManager:
             return []
     
     async def get_season_leaderboard(self, season_id: int) -> List[Dict]:
-        """Get overall season leaderboard"""
+        """Get overall season leaderboard with 60%/80% scoring rules"""
         try:
             async with aiosqlite.connect(self.bot_db_path) as db:
+                # Get all course results for the season
                 cursor = await db.execute("""
-                    SELECT player_name, total_points, courses_completed
-                    FROM player_scores 
+                    SELECT player_name, course_name, points
+                    FROM course_results 
                     WHERE season_id = ?
-                    ORDER BY total_points DESC, courses_completed DESC
+                    ORDER BY player_name, points DESC
                 """, (season_id,))
                 
-                results = []
-                position = 1
+                # Group results by player
+                player_results = {}
                 async for row in cursor:
-                    results.append({
-                        'position': position,
-                        'username': row[0],
-                        'total_points': row[1],
-                        'courses_completed': row[2]
+                    player_name = row[0]
+                    course_name = row[1] 
+                    points = row[2]
+                    
+                    if player_name not in player_results:
+                        player_results[player_name] = []
+                    player_results[player_name].append({
+                        'course': course_name,
+                        'points': points
                     })
-                    position += 1
                 
-                return results
+                # Get total number of courses in season
+                cursor = await db.execute("""
+                    SELECT COUNT(*) FROM season_courses WHERE season_id = ?
+                """, (season_id,))
+                total_courses = (await cursor.fetchone())[0]
+                
+                if total_courses == 0:
+                    return []
+                
+                # Calculate scoring requirements
+                # min_courses_required = max(1, int(0.8 * total_courses + 0.5))  # 80% rounded up
+                min_courses_required = 0
+                best_courses_count = max(1, int(0.6 * total_courses + 0.5))    # 60% rounded up
+                
+                logger.debug(f"Season {season_id}: {total_courses} total courses, "
+                           f"need {min_courses_required} minimum, best {best_courses_count} count")
+                
+                # Calculate final scores
+                final_leaderboard = []
+                for player_name, results in player_results.items():
+                    courses_completed = len(results)
+                    
+                    # Check minimum participation requirement
+                    if min_courses_required and courses_completed < min_courses_required:
+                        continue  # Player doesn't qualify
+                    
+                    # Sort by points descending and take best scores
+                    results.sort(key=lambda x: x['points'], reverse=True)
+                    best_scores = results[:best_courses_count]
+                    total_points = sum(score['points'] for score in best_scores)
+                    
+                    final_leaderboard.append({
+                        'username': player_name,
+                        'total_points': total_points,
+                        'courses_completed': courses_completed,
+                        'courses_counted': len(best_scores)
+                    })
+                
+                # Sort by total points descending
+                final_leaderboard.sort(key=lambda x: (-x['total_points'], -x['courses_completed']))
+                
+                # Add positions
+                for i, player in enumerate(final_leaderboard):
+                    player['position'] = i + 1
+                
+                return final_leaderboard
                 
         except Exception as e:
             logger.error(f"Error getting season leaderboard: {e}")

@@ -218,3 +218,6 @@ __marimo__/
 # SecretCourse
 bot-data.db
 config.json
+data.db
+log_position.txt
+bot_data.db
