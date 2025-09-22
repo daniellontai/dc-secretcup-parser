@@ -143,6 +143,49 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting active season: {e}")
             return None
+        
+    async def end_season(self, season_id: int):
+        """End the current season"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                end_time = int(datetime.now().timestamp())
+                await db.execute("""
+                    UPDATE seasons 
+                    SET is_active = FALSE, end_date = ?
+                    WHERE id = ?
+                """, (end_time, season_id))
+                
+                await db.commit()
+                logger.info(f"Ended season ID {season_id}")
+                
+        except Exception as e:
+            logger.error(f"Error ending season: {e}")
+            raise
+
+    async def get_season_by_number(self, season_number: int) -> Optional[Dict]:
+        """Get season by season number"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                cursor = await db.execute("""
+                    SELECT id, season_number, title, start_date, end_date, is_active
+                    FROM seasons WHERE season_number = ?
+                """, (season_number,))
+                
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        'id': row[0],
+                        'season_number': row[1],
+                        'title': row[2],
+                        'start_date': row[3],
+                        'end_date': row[4],
+                        'is_active': bool(row[5])
+                    }
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting season by number: {e}")
+            return None
     
     async def add_season_course(self, season_id: int, full_course_name: str, secret_until: int):
         """Add a course to the current season"""
@@ -178,9 +221,7 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error removing season course: {e}")
             raise
-            
 
-    
     async def expire_course(self, full_course_name: str, standings_data: Dict):
         """Mark a course as expired and store final standings"""
         try:

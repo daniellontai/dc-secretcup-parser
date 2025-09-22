@@ -123,6 +123,10 @@ async def secretcourse(
                 "❌ Available config commands: `channel <channel_id>`, `loglevel <off|minimal|debug>`",
                 ephemeral=True
             )
+    elif action == "leaderboard":
+        await handle_leaderboard(interaction, subaction)
+    elif action == "courses":
+        await handle_courses_list(interaction, subaction)
     
     elif action == "test":
         await handle_test(interaction)
@@ -140,7 +144,7 @@ async def secretcourse(
     
     else:
         await interaction.response.send_message(
-            "❌ Available actions: `season`, `config`, `test`, `debug`\n"
+            "❌ Available actions: `season`, `config`, `test`, `debug`, `leaderboard`, `courses`\n"
             "Use `/secretcourse season info` to see current season status.",
             ephemeral=True
         )
@@ -233,8 +237,52 @@ async def handle_season_end(interaction: discord.Interaction):
             await interaction.response.send_message("❌ No active season to end.", ephemeral=True)
             return
         
-        # TODO: Implement season ending logic in Phase 3
-        await interaction.response.send_message("🚧 Season ending functionality will be implemented in Phase 3.", ephemeral=True)
+        # Check if there are any active courses
+        courses = await db_manager.get_active_courses(season['id'])
+        active_courses = [c for c in courses if not c['expired']]
+        
+        if active_courses:
+            course_list = ", ".join([c['course_name'] for c in active_courses[:5]])
+            if len(active_courses) > 5:
+                course_list += f" (and {len(active_courses) - 5} more)"
+            
+            embed = discord.Embed(
+                title="⚠️ Confirm Season End",
+                description=f"Season {season['season_number']} still has {len(active_courses)} active courses:\n{course_list}\n\nAre you sure you want to end this season?",
+                color=discord.Color.orange()
+            )
+            
+            # TODO: Add confirmation buttons in Phase 5
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        # End the season
+        await db_manager.end_season(season['id'])
+        
+        # Get final leaderboard
+        leaderboard = await db_manager.get_season_leaderboard(season['id'])
+        
+        embed = discord.Embed(
+            title=f"🏁 Season {season['season_number']} Ended",
+            color=discord.Color.red()
+        )
+        
+        if season['title']:
+            embed.add_field(name="Title", value=season['title'], inline=False)
+        
+        embed.add_field(name="Duration", value=f"{datetime.fromtimestamp(season['start_date']).strftime('%Y-%m-%d')} - {datetime.now().strftime('%Y-%m-%d')}", inline=False)
+        
+        if leaderboard:
+            champion = leaderboard[0]
+            embed.add_field(name="🏆 Season Champion", value=f"{champion['username']} - {champion['total_points']} points", inline=False)
+            
+            if len(leaderboard) > 1:
+                top_5 = leaderboard[:5]
+                top_5_str = "\n".join([f"{p['position']}. {p['username']} - {p['total_points']} pts" for p in top_5])
+                embed.add_field(name="Top 5", value=top_5_str, inline=False)
+        
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"Season {season['season_number']} ended by {interaction.user}")
         
     except Exception as e:
         logger.error(f"Error ending season: {e}")
@@ -299,6 +347,145 @@ async def handle_config_loglevel(interaction: discord.Interaction, value: str):
     except Exception as e:
         logger.error(f"Error setting log level: {e}")
         await interaction.response.send_message("❌ An error occurred while setting the log level.", ephemeral=True)
+
+async def handle_leaderboard(interaction: discord.Interaction, value: str = None):
+    """Handle leaderboard command"""
+    try:
+        # Parse season number if provided
+        season_number = None
+        if value:
+            try:
+                season_number = int(value)
+            except ValueError:
+                await interaction.response.send_message("❌ Invalid season number.", ephemeral=True)
+                return
+        
+        # Get season
+        if season_number:
+            season = await db_manager.get_season_by_number(season_number)
+            if not season:
+                await interaction.response.send_message(f"❌ Season {season_number} not found.", ephemeral=True)
+                return
+        else:
+            season = await db_manager.get_active_season()
+            if not season:
+                await interaction.response.send_message("❌ No active season found.", ephemeral=True)
+                return
+        
+        # Get leaderboard
+        leaderboard = await db_manager.get_season_leaderboard(season['id'])
+        
+        embed = discord.Embed(
+            title=f"🏆 Season {season['season_number']} Leaderboard",
+            color=discord.Color.gold()
+        )
+        
+        if season['title']:
+            embed.add_field(name="Title", value=season['title'], inline=False)
+        
+        status = "🟢 Active" if season.get('is_active') else "🔴 Ended"
+        embed.add_field(name="Status", value=status, inline=True)
+        
+        if not leaderboard:
+            embed.add_field(name="Leaderboard", value="No results yet", inline=False)
+        else:
+            # Show top 10
+            top_10 = leaderboard[:10]
+            leaderboard_text = []
+            
+            for player in top_10:
+                medal = "🥇" if player['position'] == 1 else "🥈" if player['position'] == 2 else "🥉" if player['position'] == 3 else f"{player['position']}."
+                leaderboard_text.append(f"{medal} {player['username']} - {player['total_points']} pts ({player['courses_completed']} courses)")
+            
+            embed.add_field(name="Top 10", value="\n".join(leaderboard_text), inline=False)
+            
+            if len(leaderboard) > 10:
+                embed.add_field(name="Total Players", value=str(len(leaderboard)), inline=True)
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in leaderboard command: {e}")
+        await interaction.response.send_message("❌ An error occurred while getting the leaderboard.", ephemeral=True)
+
+async def handle_courses_list(interaction: discord.Interaction, value: str = None):
+    """Handle courses list command"""
+    try:
+        active_only = value and value.lower() in ['true', 'active', 'yes', '1']
+        
+        season = await db_manager.get_active_season()
+        if not season:
+            await interaction.response.send_message("❌ No active season found.", ephemeral=True)
+            return
+        
+        courses = await db_manager.get_active_courses(season['id'])
+        
+        if not courses:
+            await interaction.response.send_message("❌ No courses found for current season.", ephemeral=True)
+            return
+        
+        active_courses = [c for c in courses if not c['expired']]
+        expired_courses = [c for c in courses if c['expired']]
+        
+        embed = discord.Embed(
+            title=f"📋 Season {season['season_number']} Courses",
+            color=discord.Color.blue()
+        )
+        
+        if season['title']:
+            embed.description = season['title']
+        
+        # Active courses
+        if active_courses:
+            active_list = []
+            for course in sorted(active_courses, key=lambda x: x['secret_until']):
+                expiry = datetime.fromtimestamp(course['secret_until'])
+                now = datetime.now()
+                
+                # Calculate time remaining
+                time_diff = expiry - now
+                if time_diff.total_seconds() > 0:
+                    days = time_diff.days
+                    hours = time_diff.seconds // 3600
+                    minutes = (time_diff.seconds % 3600) // 60
+                    
+                    time_str = []
+                    if days > 0:
+                        time_str.append(f"{days}d")
+                    if hours > 0:
+                        time_str.append(f"{hours}h")
+                    if minutes > 0:
+                        time_str.append(f"{minutes}m")
+                    
+                    time_remaining = " ".join(time_str) if time_str else "< 1m"
+                    active_list.append(f"🟢 {course['course_name']} - expires in {time_remaining}")
+                else:
+                    active_list.append(f"🔴 {course['course_name']} - EXPIRED")
+            
+            embed.add_field(
+                name=f"Active Courses ({len(active_courses)})",
+                value="\n".join(active_list) if active_list else "None",
+                inline=False
+            )
+        
+        # Expired courses (unless active_only is specified)
+        if expired_courses and not active_only:
+            expired_list = []
+            for course in sorted(expired_courses, key=lambda x: x['secret_until'], reverse=True)[:10]:
+                standings_count = len(course['final_standings']['standings']) if course['final_standings'] else 0
+                expired_list.append(f"⚫ {course['course_name']} - {standings_count} results")
+            
+            embed.add_field(
+                name=f"Expired Courses ({len(expired_courses)})",
+                value="\n".join(expired_list),
+                inline=False
+            )
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in courses command: {e}")
+        await interaction.response.send_message("❌ An error occurred while getting courses.", ephemeral=True)
 
 async def handle_test(interaction: discord.Interaction):
     """Handle test command - for development purposes"""
