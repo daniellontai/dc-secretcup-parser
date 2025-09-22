@@ -13,6 +13,8 @@ from db_manager import db_manager
 from log_watcher import log_watcher
 from message_manager import message_manager
 
+from typing import Dict, List
+
 # Setup logging
 config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -153,10 +155,19 @@ async def secretcourse(
             )
     elif action == "update":
         await handle_update_messages(interaction)
+
+    elif action == "toggle":
+        if subaction in ["summary", "standings", "grid"]:
+            await handle_toggle_message(interaction, subaction, value)
+        else:
+            await interaction.response.send_message(
+                "❌ Available toggles: `summary <on|off>`, `standings <on|off>`, `grid <on|off>`",
+                ephemeral=True
+            )
     
     else:
         await interaction.response.send_message(
-            "❌ Available actions: `season`, `config`, `test`, `debug`, `leaderboard`, `courses`, `update`\n"
+            "❌ Available actions: `season`, `config`, `test`, `debug`, `leaderboard`, `courses`, `update`, `toggle`\n"
             "Use `/secretcourse season info` to see current season status.",
             ephemeral=True
         )
@@ -253,6 +264,9 @@ async def handle_season_end(interaction: discord.Interaction):
         courses = await db_manager.get_active_courses(season['id'])
         active_courses = [c for c in courses if not c['expired']]
         
+        # Create confirmation view
+        view = SeasonEndConfirmView(season, active_courses)
+        
         if active_courses:
             course_list = ", ".join([c['course_name'] for c in active_courses[:5]])
             if len(active_courses) > 5:
@@ -263,42 +277,18 @@ async def handle_season_end(interaction: discord.Interaction):
                 description=f"Season {season['season_number']} still has {len(active_courses)} active courses:\n{course_list}\n\nAre you sure you want to end this season?",
                 color=discord.Color.orange()
             )
-            
-            # TODO: Add confirmation buttons in Phase 5
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
+        else:
+            embed = discord.Embed(
+                title="🏁 End Season",
+                description=f"End Season {season['season_number']}?",
+                color=discord.Color.red()
+            )
         
-        # End the season
-        await db_manager.end_season(season['id'])
-        
-        # Get final leaderboard
-        leaderboard = await db_manager.get_season_leaderboard(season['id'])
-        
-        embed = discord.Embed(
-            title=f"🏁 Season {season['season_number']} Ended",
-            color=discord.Color.red()
-        )
-        
-        if season['title']:
-            embed.add_field(name="Title", value=season['title'], inline=False)
-        
-        embed.add_field(name="Duration", value=f"{datetime.fromtimestamp(season['start_date']).strftime('%Y-%m-%d')} - {datetime.now().strftime('%Y-%m-%d')}", inline=False)
-        
-        if leaderboard:
-            champion = leaderboard[0]
-            embed.add_field(name="🏆 Season Champion", value=f"{champion['username']} - {champion['total_points']} points", inline=False)
-            
-            if len(leaderboard) > 1:
-                top_5 = leaderboard[:5]
-                top_5_str = "\n".join([f"{p['position']}. {p['username']} - {p['total_points']} pts" for p in top_5])
-                embed.add_field(name="Top 5", value=top_5_str, inline=False)
-        
-        await interaction.response.send_message(embed=embed)
-        logger.info(f"Season {season['season_number']} ended by {interaction.user}")
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         
     except Exception as e:
-        logger.error(f"Error ending season: {e}")
-        await interaction.response.send_message("❌ An error occurred while ending the season.", ephemeral=True)
+        logger.error(f"Error in season end: {e}")
+        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
 
 @has_admin_role()
 async def handle_config_channel(interaction: discord.Interaction, value: str):
@@ -604,6 +594,42 @@ async def handle_update_messages(interaction: discord.Interaction):
         logger.error(f"Error in manual update: {e}")
         await interaction.response.send_message("❌ An error occurred while updating messages.", ephemeral=True)
 
+@has_admin_role()
+async def handle_toggle_message(interaction: discord.Interaction, message_type: str, value: str):
+    """Handle message type toggles"""
+    if not value or value.lower() not in ['on', 'off', 'true', 'false']:
+        await interaction.response.send_message(f"❌ Usage: `/secretcourse toggle {message_type} <on|off>`", ephemeral=True)
+        return
+    
+    try:
+        enable = value.lower() in ['on', 'true']
+        
+        # Map command names to config keys
+        type_map = {
+            "summary": "season_summary",
+            "standings": "season_standings", 
+            "grid": "course_grid"
+        }
+        
+        config_key = type_map[message_type]
+        toggles = config.get("message_toggles", {})
+        toggles[config_key] = enable
+        config.set("message_toggles", toggles)
+        
+        status = "enabled" if enable else "disabled"
+        embed = discord.Embed(
+            title="🔧 Message Toggle Updated",
+            description=f"{message_type.title()} messages {status}",
+            color=discord.Color.green() if enable else discord.Color.red()
+        )
+        
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"{message_type} messages {status} by {interaction.user}")
+        
+    except Exception as e:
+        logger.error(f"Error toggling {message_type}: {e}")
+        await interaction.response.send_message("❌ Error updating toggle.", ephemeral=True)
+
 async def handle_debug_logstatus(interaction: discord.Interaction):
     """Handle debug logstatus command - shows log monitoring status"""
     try:
@@ -691,6 +717,79 @@ async def handle_debug_courses(interaction: discord.Interaction):
     except Exception as e:
         logger.error(f"Error in debug courses: {e}")
         await interaction.response.send_message("❌ Error getting courses.", ephemeral=True)
+
+class SeasonEndConfirmView(discord.ui.View):
+    """Confirmation view for ending seasons"""
+    
+    def __init__(self, season: Dict, active_courses: List[Dict]):
+        super().__init__(timeout=300)
+        self.season = season
+        self.active_courses = active_courses
+    
+    @discord.ui.button(label="End Season", style=discord.ButtonStyle.red, emoji="🏁")
+    async def confirm_end(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            # End the season
+            await db_manager.end_season(self.season['id'])
+            
+            # Stop live updates
+            await message_manager.stop_live_updates()
+            
+            # Get final leaderboard
+            leaderboard = await db_manager.get_season_leaderboard(self.season['id'])
+            
+            embed = discord.Embed(
+                title=f"🏁 Season {self.season['season_number']} Ended",
+                color=discord.Color.red()
+            )
+            
+            if self.season['title']:
+                embed.add_field(name="Title", value=self.season['title'], inline=False)
+            
+            embed.add_field(
+                name="Duration", 
+                value=f"{datetime.fromtimestamp(self.season['start_date']).strftime('%Y-%m-%d')} - {datetime.now().strftime('%Y-%m-%d')}", 
+                inline=False
+            )
+            
+            if leaderboard:
+                champion = leaderboard[0]
+                embed.add_field(
+                    name="🏆 Season Champion", 
+                    value=f"{champion['username']} - {champion['total_points']} points", 
+                    inline=False
+                )
+                
+                if len(leaderboard) > 1:
+                    top_5 = leaderboard[:5]
+                    top_5_str = "\n".join([f"{p['position']}. {p['username']} - {p['total_points']} pts" for p in top_5])
+                    embed.add_field(name="Final Top 5", value=top_5_str, inline=False)
+            
+            # Clear the view
+            self.clear_items()
+            await interaction.response.edit_message(embed=embed, view=self)
+            
+            logger.info(f"Season {self.season['season_number']} ended by {interaction.user}")
+            
+        except Exception as e:
+            logger.error(f"Error ending season: {e}")
+            await interaction.response.send_message("❌ Error ending season.", ephemeral=True)
+    
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.gray, emoji="❌")
+    async def cancel_end(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="✅ Season End Cancelled",
+            description=f"Season {self.season['season_number']} will continue.",
+            color=discord.Color.green()
+        )
+        
+        self.clear_items()
+        await interaction.response.edit_message(embed=embed, view=self)
+    
+    async def on_timeout(self):
+        # Disable buttons on timeout
+        for item in self.children:
+            item.disabled = True
 
 async def main():
     """Main bot startup function"""

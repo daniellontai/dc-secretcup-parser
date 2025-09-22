@@ -14,6 +14,8 @@ from datetime import datetime
 from config import config
 from db_manager import db_manager
 
+import discord
+
 logger = logging.getLogger(__name__)
 
 class LogWatcher:
@@ -204,8 +206,7 @@ class LogWatcher:
             if self.bot:
                 await self.notify_course_removed(full_course_name)
             
-            # Note: We don't actually remove from database as we want to keep history
-            # The course should already be marked as expired from the JSON event
+            # Note: This was a manual admin removal so we remove from database
             
             
         except Exception as e:
@@ -276,6 +277,50 @@ class LogWatcher:
                 top_3 = standings[:3]
                 top_3_str = ", ".join([f"{r['rank']}. {r['username']} ({r['time_str']})" for r in top_3])
                 logger.info(f"Top 3 in '{course_name}': {top_3_str}")
+            
+        except Exception as e:
+            logger.error(f"Error notifying course expiry: {e}")
+
+    async def notify_course_expired(self, full_course_name: str, event_data: Dict):
+        """Notify bot about course expiry (for immediate announcements)"""
+        try:
+            course_name = full_course_name.split('(')[1].split(')')[0] if '(' in full_course_name else full_course_name
+            standings = event_data.get('standings', [])
+            
+            logger.info(f"Course '{course_name}' expired with {len(standings)} participants")
+            
+            # Send announcement if bot and channel are available
+            if self.bot and config.get("announcement_channel_id"):
+                channel = self.bot.get_channel(config.get("announcement_channel_id"))
+                
+                if channel and standings:
+                    embed = discord.Embed(
+                        title=f"🏁 {course_name.title()} - Final Results",
+                        color=discord.Color.red()
+                    )
+                    
+                    # Top 10 results
+                    top_10 = standings[:10]
+                    results_text = []
+                    
+                    for result in top_10:
+                        points = db_manager.calculate_points(result['rank'])
+                        medal = "🥇" if result['rank'] == 1 else "🥈" if result['rank'] == 2 else "🥉" if result['rank'] == 3 else f"{result['rank']}."
+                        results_text.append(f"{medal} {result['username']} - {result['time_str']}s ({points} pts)")
+                    
+                    embed.add_field(
+                        name=f"Final Standings ({len(standings)} participants)",
+                        value="\n".join(results_text),
+                        inline=False
+                    )
+                    
+                    embed.set_footer(text=f"Course expired at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    try:
+                        await channel.send(embed=embed)
+                        logger.info(f"Posted expiry announcement for {course_name}")
+                    except Exception as e:
+                        logger.error(f"Error posting expiry announcement: {e}")
             
         except Exception as e:
             logger.error(f"Error notifying course expiry: {e}")
