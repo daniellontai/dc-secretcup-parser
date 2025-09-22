@@ -11,6 +11,7 @@ from datetime import datetime
 from config import config
 from db_manager import db_manager
 from log_watcher import log_watcher
+from message_manager import message_manager
 
 # Setup logging
 config.setup_logging()
@@ -44,6 +45,9 @@ class SecretCourseBot(commands.Bot):
         
         # Setup log watcher with bot reference
         log_watcher.bot = self
+
+        # Setup message manager
+        message_manager.set_bot(self)
         
         # Sync slash commands
         try:
@@ -67,6 +71,10 @@ class SecretCourseBot(commands.Bot):
         
         # Start log monitoring
         asyncio.create_task(log_watcher.start_monitoring())
+
+        # Start live message updates
+        if config.get("live_messages_enabled", False):
+            asyncio.create_task(message_manager.start_live_updates())
 
 bot = SecretCourseBot()
 
@@ -118,9 +126,11 @@ async def secretcourse(
             await handle_config_channel(interaction, value)
         elif subaction == "loglevel":
             await handle_config_loglevel(interaction, value)
+        elif subaction == "messages":
+            await handle_config_messages(interaction, value)
         else:
             await interaction.response.send_message(
-                "❌ Available config commands: `channel <channel_id>`, `loglevel <off|minimal|debug>`",
+                "❌ Available config commands: `channel <channel_id>`, `loglevel <off|minimal|debug>`, `messages <on|off>`",
                 ephemeral=True
             )
     elif action == "leaderboard":
@@ -141,10 +151,12 @@ async def secretcourse(
                 "❌ Available debug commands: `logstatus`, `courses`",
                 ephemeral=True
             )
+    elif action == "update":
+        await handle_update_messages(interaction)
     
     else:
         await interaction.response.send_message(
-            "❌ Available actions: `season`, `config`, `test`, `debug`, `leaderboard`, `courses`\n"
+            "❌ Available actions: `season`, `config`, `test`, `debug`, `leaderboard`, `courses`, `update`\n"
             "Use `/secretcourse season info` to see current season status.",
             ephemeral=True
         )
@@ -522,6 +534,75 @@ async def on_command_error(ctx, error):
         return  # Ignore unknown commands
     
     logger.error(f"Command error: {error}")
+
+@has_admin_role()
+async def handle_config_messages(interaction: discord.Interaction, value: str):
+    """Handle config messages command to toggle live messages"""
+    if not value or value.lower() not in ['on', 'off', 'enable', 'disable', 'true', 'false']:
+        await interaction.response.send_message(
+            "❌ Usage: `/secretcourse config messages <on|off>`", 
+            ephemeral=True
+        )
+        return
+    
+    try:
+        enable = value.lower() in ['on', 'enable', 'true']
+        config.set("live_messages_enabled", enable)
+        
+        if enable:
+            if not config.get("announcement_channel_id"):
+                await interaction.response.send_message(
+                    "⚠️ Live messages enabled but no announcement channel set. Use `/secretcourse config channel` first.",
+                    ephemeral=True
+                )
+                return
+            
+            await message_manager.start_live_updates()
+            status = "✅ Live messages enabled and started"
+        else:
+            await message_manager.stop_live_updates()
+            status = "🔴 Live messages disabled and stopped"
+        
+        embed = discord.Embed(
+            title="🔧 Message Configuration Updated",
+            description=status,
+            color=discord.Color.green() if enable else discord.Color.red()
+        )
+        
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"Live messages {'enabled' if enable else 'disabled'} by {interaction.user}")
+        
+    except Exception as e:
+        logger.error(f"Error configuring messages: {e}")
+        await interaction.response.send_message("❌ An error occurred while configuring messages.", ephemeral=True)
+
+async def handle_update_messages(interaction: discord.Interaction):
+    """Handle manual message update command"""
+    try:
+        if not config.get("announcement_channel_id"):
+            await interaction.response.send_message("❌ No announcement channel configured.", ephemeral=True)
+            return
+        
+        success = await message_manager.force_update()
+        
+        if success:
+            embed = discord.Embed(
+                title="✅ Messages Updated",
+                description="All live messages have been updated manually.",
+                color=discord.Color.green()
+            )
+        else:
+            embed = discord.Embed(
+                title="❌ Update Failed", 
+                description="Error occurred while updating messages. Check logs.",
+                color=discord.Color.red()
+            )
+        
+        await interaction.response.send_message(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in manual update: {e}")
+        await interaction.response.send_message("❌ An error occurred while updating messages.", ephemeral=True)
 
 async def handle_debug_logstatus(interaction: discord.Interaction):
     """Handle debug logstatus command - shows log monitoring status"""

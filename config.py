@@ -26,12 +26,16 @@ class Config:
             "log_level": "minimal",  # off, minimal, debug
             "announcement_channel_id": None,
             "show_times_expired": True,
-            "courses_per_row": 3,
+            "courses_per_row": 2,
             "message_toggles": {
                 "season_summary": True,
                 "season_standings": True, 
                 "course_grid": True
-            }
+            },
+            "live_messages_enabled": False,
+            "message_update_interval": 300,  # 5 minutes
+            "show_spoilers": True,
+            "top_players_count": 5,
         }
         
         try:

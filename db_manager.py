@@ -420,5 +420,60 @@ class DatabaseManager:
             logger.error(f"Error getting active courses: {e}")
             return []
 
+# Add these methods after get_active_courses()
+
+    async def store_message_id(self, message_type: str, channel_id: int, message_id: int, season_id: int):
+        """Store Discord message ID for tracking"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO bot_messages 
+                    (message_type, channel_id, message_id, season_id, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (message_type, channel_id, message_id, season_id, int(datetime.now().timestamp())))
+                
+                await db.commit()
+                logger.debug(f"Stored message ID {message_id} for type {message_type}")
+                
+        except Exception as e:
+            logger.error(f"Error storing message ID: {e}")
+
+    async def get_message_ids(self, season_id: int) -> Dict[str, Dict]:
+        """Get stored message IDs for current season"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                cursor = await db.execute("""
+                    SELECT message_type, channel_id, message_id
+                    FROM bot_messages 
+                    WHERE season_id = ?
+                """, (season_id,))
+                
+                messages = {}
+                async for row in cursor:
+                    messages[row[0]] = {
+                        'channel_id': row[1],
+                        'message_id': row[2]
+                    }
+                
+                return messages
+                
+        except Exception as e:
+            logger.error(f"Error getting message IDs: {e}")
+            return {}
+
+    async def delete_message_id(self, message_type: str, season_id: int):
+        """Delete stored message ID"""
+        try:
+            async with aiosqlite.connect(self.bot_db_path) as db:
+                await db.execute("""
+                    DELETE FROM bot_messages 
+                    WHERE message_type = ? AND season_id = ?
+                """, (message_type, season_id))
+                
+                await db.commit()
+                
+        except Exception as e:
+            logger.error(f"Error deleting message ID: {e}")
+
 # Global database manager instance
 db_manager = DatabaseManager()
