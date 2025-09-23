@@ -94,7 +94,7 @@ class MessageManager:
                 return
             
             # Get current data
-            leaderboard = await db_manager.get_season_leaderboard(season['id'])
+            leaderboard = await db_manager.get_season_leaderboard_with_projections(season['id'])
             courses = await db_manager.get_active_courses(season['id'])
             current_standings = await self._get_current_standings(courses)
             

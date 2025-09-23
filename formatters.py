@@ -89,7 +89,7 @@ class MessageFormatter:
         embed.set_footer(text=f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
         return embed
-    
+
     @staticmethod
     def create_season_standings(season: Dict, leaderboard: List[Dict]) -> discord.Embed:
         """Create the detailed season standings table (message type 2)"""
@@ -105,19 +105,29 @@ class MessageFormatter:
             embed.add_field(name="Standings", value="No results yet", inline=False)
             return embed
         
-        # Create table format
-        standings_text = "```\nPos | Player           | Score | Courses\n"
-        standings_text += "----|------------------|-------|--------\n"
+        # Create table format with new columns
+        standings_text = "```\nPos | Player     | Score | Projected | Courses\n"
+        standings_text += "    |            |       | Score     | Ran    \n"
+        standings_text += "----|------------|-------|-----------|--------\n"
         
         # Show more players in this detailed view
         display_count = min(20, len(leaderboard))
         
         for player in leaderboard[:display_count]:
             # Truncate long usernames
-            username = player['username'][:15] if len(player['username']) > 15 else player['username']
-            username_padded = f"{username:<15}"
+            username = player['username'][:10] if len(player['username']) > 10 else player['username']
+            username_padded = f"{username:<10}"
             
-            standings_text += f" {player['position']:2d} | {username_padded} | {player['total_points']:5d} | {player['courses_completed']:7d}\n"
+            # Current actual score from expired courses
+            actual_score = player['total_points']
+            
+            # Projected score (actual + potential from active courses) 
+            projected_score = player.get('projected_points', actual_score)  # Fallback to actual if not calculated
+            
+            # Courses ran count
+            courses_ran = player['courses_completed']
+            
+            standings_text += f" {player['position']:2d} | {username_padded} | {actual_score:5d} | {projected_score:9d} | {courses_ran:6d}\n"
         
         standings_text += "```"
         
@@ -132,8 +142,8 @@ class MessageFormatter:
         
         embed.set_footer(text=f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        return embed
-    
+        return embed    
+ 
     @staticmethod 
     def create_course_grid(season: Dict, courses: List[Dict], current_standings: Dict) -> discord.Embed:
         """Create the per-course standings grid (message type 3)"""

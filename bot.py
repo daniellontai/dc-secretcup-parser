@@ -375,7 +375,7 @@ async def handle_leaderboard(interaction: discord.Interaction, value: str = None
                 return
         
         # Get leaderboard
-        leaderboard = await db_manager.get_season_leaderboard(season['id'])
+        leaderboard = await db_manager.get_season_leaderboard_with_projections(season['id'])
         
         embed = discord.Embed(
             title=f"🏆 Season {season['season_number']} Leaderboard",

@@ -392,6 +392,95 @@ class DatabaseManager:
             logger.error(f"Error getting season leaderboard: {e}")
             return []
     
+    async def get_season_leaderboard_with_projections(self, season_id: int) -> List[Dict]:
+        """Get season leaderboard with projected scores included"""
+        try:
+            # Get base leaderboard first
+            leaderboard = await self.get_season_leaderboard(season_id)
+            
+            # Get all courses for this season
+            courses = await self.get_active_courses(season_id)
+            active_courses = [c for c in courses if not c['expired']]
+            
+            # Calculate correct courses_completed count and projected scores
+            for player in leaderboard:
+                player_name = player['username']
+                
+                # Count total courses this player has runs on (active + expired)
+                total_courses_ran = 0
+                projected_points = player['total_points']  # Start with actual points
+                
+                # Count expired courses (from course_results table)
+                async with aiosqlite.connect(self.bot_db_path) as db:
+                    cursor = await db.execute("""
+                        SELECT COUNT(DISTINCT course_name) FROM course_results 
+                        WHERE season_id = ? AND player_name = ?
+                    """, (season_id, player_name))
+                    
+                    expired_courses_ran = (await cursor.fetchone())[0]
+                    total_courses_ran += expired_courses_ran
+                
+                # Check active courses and add projected points
+                for course in active_courses:
+                    current_standings = await self.get_current_standings(course['full_course_name'])
+                    player_standing = next((s for s in current_standings if s['username'] == player_name), None)
+                    
+                    if player_standing:
+                        total_courses_ran += 1  # Player has a run on this active course
+                        position = player_standing.get('position', player_standing.get('rank', 999))
+                        projected_points += self.calculate_points(position)
+                
+                # Update courses_completed to reflect actual count
+                player['courses_completed'] = total_courses_ran
+                
+                # Apply 60% rule if player has enough courses
+                total_courses = len(courses)
+                courses_needed_for_60_percent = max(1, int(0.6 * total_courses + 0.5))
+                
+                if total_courses_ran >= courses_needed_for_60_percent:
+                    # Get all individual course points (actual + projected)
+                    all_course_points = []
+                    
+                    # Add actual points from expired courses
+                    async with aiosqlite.connect(self.bot_db_path) as db:
+                        cursor = await db.execute("""
+                            SELECT points FROM course_results 
+                            WHERE season_id = ? AND player_name = ?
+                        """, (season_id, player_name))
+                        
+                        async for row in cursor:
+                            all_course_points.append(row[0])
+                    
+                    # Add projected points from active courses
+                    for course in active_courses:
+                        current_standings = await self.get_current_standings(course['full_course_name'])
+                        player_standing = next((s for s in current_standings if s['username'] == player_name), None)
+                        
+                        if player_standing:
+                            position = player_standing.get('position', player_standing.get('rank', 999))
+                            all_course_points.append(self.calculate_points(position))
+                    
+                    # Apply 60% rule: take best scores
+                    if all_course_points:
+                        all_course_points.sort(reverse=True)  # Highest first
+                        best_scores = all_course_points[:courses_needed_for_60_percent]
+                        projected_points = sum(best_scores)
+                
+                player['projected_points'] = projected_points
+            
+            # Re-sort by actual points (keep original ordering)
+            leaderboard.sort(key=lambda x: (-x['total_points'], -x['courses_completed']))
+            
+            # Update positions
+            for i, player in enumerate(leaderboard):
+                player['position'] = i + 1
+            
+            return leaderboard
+            
+        except Exception as e:
+            logger.error(f"Error getting leaderboard with projections: {e}")
+            return []
+
     async def get_active_courses(self, season_id: int) -> List[Dict]:
         """Get all courses for the active season"""
         try:
