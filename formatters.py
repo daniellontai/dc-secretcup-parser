@@ -290,7 +290,7 @@ class MessageFormatter:
     def calculate_points(position: int) -> int:
         """Calculate points for a given position"""
         points_map = {
-            1: 30, 2: 25, 3: 20, 4: 18, 5: 16, 6: 14, 7: 12, 8: 10, 9: 8, 10: 6
+            1: 30, 2: 25, 3: 21, 4: 18, 5: 16, 6: 14, 7: 12, 8: 10, 9: 8, 10: 6
         }
         
         if position <= 10:

@@ -272,7 +272,7 @@ class DatabaseManager:
     def calculate_points(self, position: int) -> int:
         """Calculate points based on position using Formula 1 style scoring"""
         points_map = {
-            1: 30, 2: 25, 3: 20, 4: 18, 5: 16, 6: 14, 7: 12, 8: 10, 9: 8, 10: 6
+            1: 30, 2: 25, 3: 21, 4: 18, 5: 16, 6: 14, 7: 12, 8: 10, 9: 8, 10: 6
         }
         
         if position <= 10:
@@ -353,7 +353,7 @@ class DatabaseManager:
                 # Calculate scoring requirements
                 # min_courses_required = max(1, int(0.8 * total_courses + 0.5))  # 80% rounded up
                 min_courses_required = 0
-                best_courses_count = max(1, int(0.6 * total_courses + 0.5))    # 60% rounded up
+                best_courses_count = max(1, int(0.7 * total_courses + 0.5))    # 60% rounded up
                 
                 logger.debug(f"Season {season_id}: {total_courses} total courses, "
                            f"need {min_courses_required} minimum, best {best_courses_count} count")
