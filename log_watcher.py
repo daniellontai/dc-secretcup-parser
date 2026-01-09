@@ -104,7 +104,7 @@ class LogWatcher:
                 return
             
             # Read new content
-            async with aiofiles.open(self.log_file_path, 'r') as f:
+            async with aiofiles.open(self.log_file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 await f.seek(self.last_position)
                 new_content = await f.read()
                 self.last_position = current_size
@@ -271,12 +271,39 @@ class LogWatcher:
             
             logger.info(f"Course '{course_name}' expired with {len(standings)} participants")
             
-            # TODO: Send announcement message when implemented in Phase 4
-            # For now, just log the top 3
-            if standings:
-                top_3 = standings[:3]
-                top_3_str = ", ".join([f"{r['rank']}. {r['username']} ({r['time_str']})" for r in top_3])
-                logger.info(f"Top 3 in '{course_name}': {top_3_str}")
+            # Send announcement if bot and channel are available
+            if self.bot and config.get("announcement_channel_id"):
+                channel = self.bot.get_channel(config.get("announcement_channel_id"))
+                
+                if channel and standings:
+                    embed = discord.Embed(
+                        title=f"🏁 {course_name.title()} - Final Results",
+                        color=discord.Color.red()
+                    )
+                    
+                    # Top 10 results
+                    top_10 = standings[:10]
+                    results_text = []
+                    
+                    for result in top_10:
+                        points = db_manager.calculate_points(result['rank'])
+                        medal = "🥇" if result['rank'] == 1 else "🥈" if result['rank'] == 2 else "🥉" if result['rank'] == 3 else f"{result['rank']}."
+                        results_text.append(f"{medal} {result['username']} - {result['time_str']}s ({points} pts)")
+                    
+                    embed.add_field(
+                        name=f"Final Standings ({len(standings)} participants)",
+                        value="\n".join(results_text),
+                        inline=False
+                    )
+                    
+                    embed.set_footer(text=f"Course expired at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    
+                    try:
+                        # Send message with @everyone ping
+                        await channel.send("@everyone", embed=embed)
+                        logger.info(f"Posted expiry announcement for {course_name} with @everyone ping")
+                    except Exception as e:
+                        logger.error(f"Error posting expiry announcement: {e}")
             
         except Exception as e:
             logger.error(f"Error notifying course expiry: {e}")
