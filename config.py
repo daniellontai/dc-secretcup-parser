@@ -36,6 +36,8 @@ class Config:
             "message_update_interval": 300,  # 5 minutes
             "show_spoilers": True,
             "top_players_count": 5,
+            "min_courses_required": 0,  # 0 = disabled (no minimum participation requirement)
+            "best_courses_count": 0,    # 0 = all courses count toward score
         }
         
         try:

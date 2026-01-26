@@ -39,12 +39,6 @@ class SecretCourseBot(commands.Bot):
         # Initialize bot database
         await db_manager.init_bot_database()
         
-        # Check if Season 1 exists, create if not
-        active_season = await db_manager.get_active_season()
-        if not active_season:
-            logger.info("No active season found, creating Season 1")
-            await db_manager.create_season(1, "Haven Climb Cup")
-        
         # Setup log watcher with bot reference
         log_watcher.bot = self
 
@@ -130,9 +124,11 @@ async def secretcourse(
             await handle_config_loglevel(interaction, value)
         elif subaction == "messages":
             await handle_config_messages(interaction, value)
+        elif subaction == "scoring":
+            await handle_config_scoring(interaction, value)
         else:
             await interaction.response.send_message(
-                "❌ Available config commands: `channel <channel_id>`, `loglevel <off|minimal|debug>`, `messages <on|off>`",
+                "❌ Available config commands: `channel <channel_id>`, `loglevel <off|minimal|debug>`, `messages <on|off>`, `scoring [min|best <number>]`",
                 ephemeral=True
             )
     elif action == "leaderboard":
@@ -349,6 +345,84 @@ async def handle_config_loglevel(interaction: discord.Interaction, value: str):
     except Exception as e:
         logger.error(f"Error setting log level: {e}")
         await interaction.response.send_message("❌ An error occurred while setting the log level.", ephemeral=True)
+
+@has_admin_role()
+async def handle_config_scoring(interaction: discord.Interaction, value: str):
+    """Handle config scoring command - set min_courses_required or best_courses_count"""
+    if not value:
+        # Show current settings
+        min_req = config.get("min_courses_required", 0)
+        best_count = config.get("best_courses_count", 0)
+
+        embed = discord.Embed(
+            title="📊 Scoring Configuration",
+            color=discord.Color.blue()
+        )
+        embed.add_field(
+            name="min_courses_required",
+            value=f"`{min_req}` (0 = disabled)",
+            inline=False
+        )
+        embed.add_field(
+            name="best_courses_count",
+            value=f"`{best_count}` (0 = all courses count)",
+            inline=False
+        )
+        embed.add_field(
+            name="Usage",
+            value="`/secretcourse config scoring min <number>`\n`/secretcourse config scoring best <number>`",
+            inline=False
+        )
+
+        await interaction.response.send_message(embed=embed)
+        return
+
+    try:
+        parts = value.split()
+        if len(parts) != 2:
+            await interaction.response.send_message(
+                "❌ Usage: `scoring min <number>` or `scoring best <number>`",
+                ephemeral=True
+            )
+            return
+
+        setting_type, number = parts[0].lower(), int(parts[1])
+
+        if number < 0:
+            await interaction.response.send_message("❌ Value must be 0 or positive.", ephemeral=True)
+            return
+
+        if setting_type == "min":
+            config.set("min_courses_required", number)
+            desc = f"Minimum courses required set to `{number}`"
+            if number == 0:
+                desc += " (disabled)"
+        elif setting_type == "best":
+            config.set("best_courses_count", number)
+            desc = f"Best courses count set to `{number}`"
+            if number == 0:
+                desc += " (all courses count)"
+        else:
+            await interaction.response.send_message(
+                "❌ Unknown setting. Use `min` or `best`.",
+                ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title="✅ Scoring Configuration Updated",
+            description=desc,
+            color=discord.Color.green()
+        )
+
+        await interaction.response.send_message(embed=embed)
+        logger.info(f"Scoring config {setting_type} set to {number} by {interaction.user}")
+
+    except ValueError:
+        await interaction.response.send_message("❌ Invalid number.", ephemeral=True)
+    except Exception as e:
+        logger.error(f"Error setting scoring config: {e}")
+        await interaction.response.send_message("❌ An error occurred.", ephemeral=True)
 
 async def handle_leaderboard(interaction: discord.Interaction, value: str = None):
     """Handle leaderboard command"""

@@ -350,11 +350,15 @@ class DatabaseManager:
                 if total_courses == 0:
                     return []
                 
-                # Calculate scoring requirements
-                # min_courses_required = max(1, int(0.8 * total_courses + 0.5))  # 80% rounded up
-                min_courses_required = 0
-                best_courses_count = max(1, int(0.7 * total_courses + 0.5))    # 60% rounded up
-                
+                # Get scoring requirements from config (0 = disabled/all)
+                min_courses_required = config.get("min_courses_required", 0)
+                if min_courses_required > total_courses:
+                    min_courses_required = total_courses
+
+                best_courses_count = config.get("best_courses_count", 0)
+                if best_courses_count == 0 or best_courses_count > total_courses:
+                    best_courses_count = total_courses
+
                 logger.debug(f"Season {season_id}: {total_courses} total courses, "
                            f"need {min_courses_required} minimum, best {best_courses_count} count")
                 
@@ -395,13 +399,29 @@ class DatabaseManager:
     async def get_season_leaderboard_with_projections(self, season_id: int) -> List[Dict]:
         """Get season leaderboard with projected scores included"""
         try:
-            # Get base leaderboard first
+            # Get base leaderboard first (players with expired course results)
             leaderboard = await self.get_season_leaderboard(season_id)
-            
+
             # Get all courses for this season
             courses = await self.get_active_courses(season_id)
             active_courses = [c for c in courses if not c['expired']]
-            
+
+            # Discover players from active courses who aren't in base leaderboard yet
+            existing_players = {p['username'] for p in leaderboard}
+
+            for course in active_courses:
+                current_standings = await self.get_current_standings(course['full_course_name'])
+                for standing in current_standings:
+                    if standing['username'] not in existing_players:
+                        # Add new player with 0 actual points
+                        leaderboard.append({
+                            'username': standing['username'],
+                            'total_points': 0,
+                            'courses_completed': 0,
+                            'courses_counted': 0
+                        })
+                        existing_players.add(standing['username'])
+
             # Calculate correct courses_completed count and projected scores
             for player in leaderboard:
                 player_name = player['username']
@@ -433,11 +453,13 @@ class DatabaseManager:
                 # Update courses_completed to reflect actual count
                 player['courses_completed'] = total_courses_ran
                 
-                # Apply 60% rule if player has enough courses
+                # Apply best_courses_count rule if configured
                 total_courses = len(courses)
-                courses_needed_for_60_percent = max(1, int(0.6 * total_courses + 0.5))
-                
-                if total_courses_ran >= courses_needed_for_60_percent:
+                best_courses_count = config.get("best_courses_count", 0)
+                if best_courses_count == 0 or best_courses_count > total_courses:
+                    best_courses_count = total_courses
+
+                if total_courses_ran >= best_courses_count:
                     # Get all individual course points (actual + projected)
                     all_course_points = []
                     
@@ -460,16 +482,16 @@ class DatabaseManager:
                             position = player_standing.get('position', player_standing.get('rank', 999))
                             all_course_points.append(self.calculate_points(position))
                     
-                    # Apply 60% rule: take best scores
+                    # Apply best_courses_count rule: take best scores
                     if all_course_points:
                         all_course_points.sort(reverse=True)  # Highest first
-                        best_scores = all_course_points[:courses_needed_for_60_percent]
+                        best_scores = all_course_points[:best_courses_count]
                         projected_points = sum(best_scores)
                 
                 player['projected_points'] = projected_points
             
-            # Re-sort by actual points (keep original ordering)
-            leaderboard.sort(key=lambda x: (-x['total_points'], -x['courses_completed']))
+            # Re-sort by actual points, then projected points as tiebreaker
+            leaderboard.sort(key=lambda x: (-x['total_points'], -x.get('projected_points', 0), -x['courses_completed']))
             
             # Update positions
             for i, player in enumerate(leaderboard):
