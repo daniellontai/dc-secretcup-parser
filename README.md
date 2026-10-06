@@ -5,7 +5,7 @@ Discord bot for tracking TaystJK game server Secret Course competitions. It poll
 ## Requirements
 
 - Python 3.11+
-- TaystJK game server with accessible log file and database
+- JKA Secret Course JSON exports accessible to the bot process
 
 ## Installation
 
@@ -35,7 +35,8 @@ pip install -r requirements.txt
    - `discord_token` - Bot token from [Discord Developer Portal](https://discord.com/developers/applications)
    - `secretcourses.export_root` - Directory containing JKA's `secretcourses/` exports
    - `bot_db_path` - Path for bot's SQLite database (created automatically)
-   - `announcement_channel_id` - Discord channel ID for live messages
+   - `discord.default_channel_id` - Shared Discord channel ID for season dashboards
+   - `discord.season_channel_ids` - Optional per-JKA-season channel overrides
    - `admin_role` - Role name required to run admin commands
 
 ## Running the Bot
@@ -49,19 +50,12 @@ python bot.py
 
 All commands use `/secretcourse <action> [subaction] [value]`.
 
-### Season Management
-
-| Command | Description |
-|---------|-------------|
-| `season info` | Show current season status and course count |
-| `season start <number> [title]` | Start a new season (Admin) |
-| `season end` | End the current season with confirmation (Admin) |
-
 ### Configuration (Admin)
 
 | Command | Description |
 |---------|-------------|
-| `config channel <channel_id>` | Set the announcement channel for live messages |
+| `config default-channel <channel_id>` | Set the default dashboard channel |
+| `config season-channel <season-id> <channel-id>` | Override the dashboard channel for one JKA season |
 | `config loglevel <off\|minimal\|debug>` | Set bot logging verbosity |
 | `config messages <on\|off>` | Enable/disable live message updates |
 | `config scoring` | View current scoring settings |
@@ -80,45 +74,14 @@ All commands use `/secretcourse <action> [subaction] [value]`.
 
 | Command | Description |
 |---------|-------------|
-| `leaderboard [season_number]` | Show top 10 leaderboard (current or specified season) |
-| `courses [active]` | List all courses (or only active ones) |
+| `leaderboard <season-id>` | Show a JKA season's standings |
+| `courses <season-id>` | List a JKA season's cup courses |
 | `update` | Force refresh all live messages |
 
 ### Debug
 
 | Command | Description |
 |---------|-------------|
-| `test` | Test bot connectivity and file access |
-| `debug logstatus` | Show log watcher status and file position |
-| `debug courses` | Show all courses in database with expiry times |
+| `debug sync` | Show the latest JSON import revision and warning count |
 
-## Starting a New Season
-
-1. **Start the season:**
-
-   ```text
-   /secretcourse season start <number> [title]
-   ```
-
-   Example: `/secretcourse season start 1 Summer 2024`
-
-2. **Set the announcement channel:**
-
-   ```text
-   /secretcourse config channel <channel_id>
-   ```
-
-3. **Enable live messages:**
-
-   ```text
-   /secretcourse config messages on
-   ```
-
-4. **Verify setup:**
-
-   ```text
-   /secretcourse season info
-   /secretcourse test
-   ```
-
-JKA owns course schedules, finalization, and season names. The bot imports cup courses automatically; permanent courses are ignored. All seasons use the default channel unless `discord.season_channel_ids` provides an override.
+JKA owns course schedules, finalization, and season names. The bot imports only cup courses automatically; permanent courses are ignored. An active course that disappears is cancelled without points, while a finalized snapshot is retained. All seasons use the default channel unless `discord.season_channel_ids` provides an override.

@@ -287,6 +287,30 @@ class MessageFormatter:
         return embed
 
     @staticmethod
+    def create_season_dashboard(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool) -> discord.Embed:
+        """Render one imported JKA season without relying on legacy bot seasons."""
+        embed = discord.Embed(title=f"🏆 {season['name']}", color=discord.Color.green())
+        if not courses:
+            embed.description = "No cup courses"
+            return embed
+
+        for course in courses:
+            lifecycle = course["lifecycle"]
+            if lifecycle == "scheduled":
+                value = f"Scheduled: <t:{course['starts_at']}:F> – <t:{course['expires_at']}:F>"
+            else:
+                lines = []
+                for result in results.get(course["id"], []):
+                    line = f"{result['rank']}. {result['username']}"
+                    if lifecycle == "expired" and show_final_times:
+                        line += f" — {result['time']}"
+                    lines.append(line)
+                label = "Finalized" if lifecycle == "expired" else lifecycle.title()
+                value = f"{label}\n" + ("\n".join(lines) if lines else "No rankings yet")
+            embed.add_field(name=course["course_name"], value=value, inline=False)
+        return embed
+
+    @staticmethod
     def calculate_points(position: int) -> int:
         """Calculate points for a given position"""
         points_map = {

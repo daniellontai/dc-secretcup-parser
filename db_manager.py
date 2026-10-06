@@ -1,47 +1,150 @@
-import sqlite3,time
+"""Durable, JKA-ID-keyed storage for imported Secret Course state."""
+
+import sqlite3
+import time
+from collections import defaultdict
+from typing import Sequence
+
 from config import config
+from secretcourse_types import LeaderboardEntry, StatusExport
+
+
 class DatabaseManager:
- def __init__(self,path=None):self.bot_db_path=path or config.get('bot_db_path')
- def _db(self):return sqlite3.connect(self.bot_db_path)
- async def init_bot_database(self):
-  with self._db() as d:d.executescript('CREATE TABLE IF NOT EXISTS sc_imported_seasons(id TEXT PRIMARY KEY,name TEXT,starts_at INTEGER,expires_at INTEGER,revision TEXT,last_seen_at INTEGER);CREATE TABLE IF NOT EXISTS sc_imported_courses(id TEXT PRIMARY KEY,season_id TEXT,course_name TEXT,starts_at INTEGER,expires_at INTEGER,lifecycle TEXT,activated_at INTEGER,finalized_at INTEGER,revision TEXT,last_seen_at INTEGER,retired_at INTEGER,final_imported_at INTEGER);CREATE TABLE IF NOT EXISTS sc_course_results(course_id TEXT,username TEXT,style INTEGER,rank INTEGER,time TEXT,duration_ms INTEGER,topspeed INTEGER,average INTEGER,end_time INTEGER,is_final INTEGER,PRIMARY KEY(course_id,username,style));CREATE TABLE IF NOT EXISTS sc_final_points(course_id TEXT,username TEXT,points INTEGER,PRIMARY KEY(course_id,username));')
- async def apply_status(self,s,seen_at):
-  with self._db() as d:
-   for x in s.seasons:d.execute('INSERT OR REPLACE INTO sc_imported_seasons VALUES(?,?,?,?,?,?)',(x.id,x.name,x.starts_at,x.expires_at,s.revision,seen_at))
-   for c in s.courses:
-    if c.type=='cup':d.execute('INSERT OR REPLACE INTO sc_imported_courses(id,season_id,course_name,starts_at,expires_at,lifecycle,activated_at,finalized_at,revision,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)',(c.id,c.season_id,c.course_name,c.starts_at,c.expires_at,c.lifecycle,c.activated_at,c.finalized_at,s.revision,seen_at))
- async def finalize_course(self,id,at,rows):
-  with self._db() as d:
-   if d.execute('SELECT final_imported_at FROM sc_imported_courses WHERE id=?',(id,)).fetchone()[0] is not None:return False
-   d.execute('DELETE FROM sc_course_results WHERE course_id=?',(id,))
-   for n,x in enumerate(rows,1):
-    d.execute('INSERT INTO sc_course_results VALUES(?,?,?,?,?,?,?,?,?,1)',(id,x.username,x.style,n,x.time,x.duration_ms,x.topspeed,x.average,x.end_time));d.execute('INSERT INTO sc_final_points VALUES(?,?,?)',(id,x.username,self.calculate_points(n)))
-   d.execute("UPDATE sc_imported_courses SET lifecycle='expired',finalized_at=?,final_imported_at=? WHERE id=?",(at,int(time.time()),id));return True
- async def replace_live_results(self,course_id,entries):
-  with self._db() as d:
-   row=d.execute('SELECT final_imported_at FROM sc_imported_courses WHERE id=?',(course_id,)).fetchone()
-   if row and row[0] is None:
-    d.execute('DELETE FROM sc_course_results WHERE course_id=?',(course_id,))
-    for n,x in enumerate(entries,1):d.execute('INSERT INTO sc_course_results VALUES(?,?,?,?,?,?,?,?,?,0)',(course_id,x.username,x.style,n,x.time,x.duration_ms,x.topspeed,x.average,x.end_time))
- async def mark_missing_courses(self,seen_course_ids,seen_at):
-  with self._db() as d:
-   for (id,) in d.execute('SELECT id FROM sc_imported_courses WHERE final_imported_at IS NULL'):
-    if id not in seen_course_ids:d.execute("UPDATE sc_imported_courses SET lifecycle='cancelled',retired_at=? WHERE id=?",(seen_at,id))
- async def get_season_courses(self,s):
-  with self._db() as d:return [dict(zip(('id','course_name','starts_at','expires_at','lifecycle','finalized_at'),r)) for r in d.execute('SELECT id,course_name,starts_at,expires_at,lifecycle,finalized_at FROM sc_imported_courses WHERE season_id=?',(s,))]
- async def get_imported_seasons(self):
-  with self._db() as d:return [dict(zip(('id','name','starts_at','expires_at'),r)) for r in d.execute('SELECT id,name,starts_at,expires_at FROM sc_imported_seasons ORDER BY starts_at,id')]
- async def get_message(self,season_id):
-  with self._db() as d:return d.execute('SELECT channel_id,message_id FROM sc_season_messages WHERE season_id=? AND message_type=?',(season_id,'dashboard')).fetchone()
- async def store_message(self,season_id,channel_id,message_id):
-  with self._db() as d:d.execute('CREATE TABLE IF NOT EXISTS sc_season_messages(season_id TEXT,message_type TEXT,channel_id INTEGER,message_id INTEGER,PRIMARY KEY(season_id,message_type))');d.execute('INSERT OR REPLACE INTO sc_season_messages VALUES(?,?,?,?)',(season_id,'dashboard',channel_id,message_id))
- async def get_season_leaderboard(self,s,include_projections=True):
-  with self._db() as d:r=d.execute('SELECT username,points FROM sc_final_points p JOIN sc_imported_courses c ON c.id=p.course_id WHERE c.season_id=?',(s,)).fetchall()
-  x={}
-  for n,p in r:x.setdefault(n,[]).append(p)
-  o=[{'username':n,'total_points':sum(v),'projected_points':sum(v),'courses_completed':len(v)} for n,v in x.items()];o.sort(key=lambda z:(-z['total_points'],z['username']))
-  for n,z in enumerate(o,1):z['position']=n
-  return o
- @staticmethod
- def calculate_points(n):return {1:30,2:25,3:21,4:18,5:16,6:14,7:12,8:10,9:8,10:6}.get(n,4 if n<=15 else 3 if n<=20 else 2 if n<=25 else 1 if n<=30 else 0)
-db_manager=DatabaseManager()
+    def __init__(self, path: str | None = None):
+        self.bot_db_path = path or config.get("bot_db_path")
+
+    def _db(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.bot_db_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    async def init_bot_database(self) -> None:
+        with self._db() as database:
+            database.executescript("""
+                CREATE TABLE IF NOT EXISTS sc_imported_seasons (id TEXT PRIMARY KEY, name TEXT NOT NULL, starts_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revision TEXT NOT NULL, last_seen_at INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS sc_imported_courses (id TEXT PRIMARY KEY, season_id TEXT NOT NULL, course_name TEXT NOT NULL, starts_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, lifecycle TEXT NOT NULL, activated_at INTEGER, finalized_at INTEGER, revision TEXT NOT NULL, last_seen_at INTEGER NOT NULL, retired_at INTEGER, final_imported_at INTEGER, announced_at INTEGER, announcement_claimed_at INTEGER);
+                CREATE TABLE IF NOT EXISTS sc_course_results (course_id TEXT NOT NULL, username TEXT NOT NULL, style INTEGER NOT NULL, rank INTEGER NOT NULL, time TEXT NOT NULL, duration_ms INTEGER NOT NULL, topspeed INTEGER NOT NULL, average INTEGER NOT NULL, end_time INTEGER NOT NULL, is_final INTEGER NOT NULL, PRIMARY KEY(course_id, username, style));
+                CREATE TABLE IF NOT EXISTS sc_final_points (course_id TEXT NOT NULL, username TEXT NOT NULL, points INTEGER NOT NULL, PRIMARY KEY(course_id, username));
+                CREATE TABLE IF NOT EXISTS sc_season_messages (season_id TEXT NOT NULL, message_type TEXT NOT NULL, channel_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY(season_id, message_type));
+            """)
+            columns = {row["name"] for row in database.execute("PRAGMA table_info(sc_imported_courses)")}
+            for name in ("announced_at", "announcement_claimed_at"):
+                if name not in columns:
+                    database.execute(f"ALTER TABLE sc_imported_courses ADD COLUMN {name} INTEGER")
+
+    async def apply_status(self, status: StatusExport, seen_at: int) -> None:
+        with self._db() as database:
+            for season in status.seasons:
+                database.execute("""INSERT INTO sc_imported_seasons VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET name=excluded.name, starts_at=excluded.starts_at, expires_at=excluded.expires_at, revision=excluded.revision, last_seen_at=excluded.last_seen_at""", (season.id, season.name, season.starts_at, season.expires_at, status.revision, seen_at))
+            for course in status.courses:
+                if course.type != "cup":
+                    continue
+                database.execute("""INSERT INTO sc_imported_courses (id,season_id,course_name,starts_at,expires_at,lifecycle,activated_at,finalized_at,revision,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(id) DO UPDATE SET season_id=excluded.season_id, course_name=excluded.course_name, starts_at=excluded.starts_at, expires_at=excluded.expires_at, lifecycle=excluded.lifecycle, activated_at=excluded.activated_at, finalized_at=excluded.finalized_at, revision=excluded.revision, last_seen_at=excluded.last_seen_at, retired_at=NULL""", (course.id, course.season_id, course.course_name, course.starts_at, course.expires_at, course.lifecycle, course.activated_at, course.finalized_at, status.revision, seen_at))
+
+    @staticmethod
+    def _insert_results(database: sqlite3.Connection, course_id: str, entries: Sequence[LeaderboardEntry], is_final: bool) -> None:
+        for rank, entry in enumerate(entries, start=1):
+            database.execute("INSERT INTO sc_course_results (course_id,username,style,rank,time,duration_ms,topspeed,average,end_time,is_final) VALUES(?,?,?,?,?,?,?,?,?,?)", (course_id, entry.username, entry.style, rank, entry.time, entry.duration_ms, entry.topspeed, entry.average, entry.end_time, int(is_final)))
+
+    async def replace_live_results(self, course_id: str, entries: Sequence[LeaderboardEntry]) -> None:
+        with self._db() as database:
+            course = database.execute("SELECT final_imported_at FROM sc_imported_courses WHERE id=?", (course_id,)).fetchone()
+            if course is None or course["final_imported_at"] is not None:
+                return
+            database.execute("DELETE FROM sc_course_results WHERE course_id=? AND is_final=0", (course_id,))
+            self._insert_results(database, course_id, entries, False)
+
+    async def finalize_course(self, course_id: str, finalized_at: int, entries: Sequence[LeaderboardEntry]) -> bool:
+        with self._db() as database:
+            course = database.execute("SELECT final_imported_at FROM sc_imported_courses WHERE id=?", (course_id,)).fetchone()
+            if course is None or course["final_imported_at"] is not None:
+                return False
+            database.execute("DELETE FROM sc_course_results WHERE course_id=?", (course_id,))
+            database.execute("DELETE FROM sc_final_points WHERE course_id=?", (course_id,))
+            self._insert_results(database, course_id, entries, True)
+            for rank, entry in enumerate(entries, start=1):
+                database.execute("INSERT INTO sc_final_points VALUES(?,?,?)", (course_id, entry.username, self.calculate_points(rank)))
+            database.execute("UPDATE sc_imported_courses SET lifecycle='expired', finalized_at=?, final_imported_at=? WHERE id=?", (finalized_at, int(time.time()), course_id))
+            return True
+
+    async def mark_missing_courses(self, seen_course_ids: set[str], seen_at: int) -> None:
+        with self._db() as database:
+            for row in database.execute("SELECT id FROM sc_imported_courses WHERE final_imported_at IS NULL AND lifecycle='active'"):
+                if row["id"] not in seen_course_ids:
+                    database.execute("UPDATE sc_imported_courses SET lifecycle='cancelled', retired_at=? WHERE id=?", (seen_at, row["id"]))
+
+    async def get_imported_seasons(self) -> list[dict]:
+        with self._db() as database:
+            return [dict(row) for row in database.execute("SELECT id,name,starts_at,expires_at FROM sc_imported_seasons ORDER BY starts_at,id")]
+
+    async def get_season_courses(self, season_id: str) -> list[dict]:
+        with self._db() as database:
+            return [dict(row) for row in database.execute("SELECT id,season_id,course_name,starts_at,expires_at,lifecycle,finalized_at FROM sc_imported_courses WHERE season_id=? ORDER BY starts_at,id", (season_id,))]
+
+    async def get_course(self, course_id: str) -> dict | None:
+        with self._db() as database:
+            row = database.execute("SELECT * FROM sc_imported_courses WHERE id=?", (course_id,)).fetchone()
+            return dict(row) if row else None
+
+    async def get_course_results(self, course_id: str) -> list[dict]:
+        with self._db() as database:
+            return [dict(row) for row in database.execute("SELECT username,rank,time,is_final FROM sc_course_results WHERE course_id=? ORDER BY rank,username", (course_id,))]
+
+    async def get_season_leaderboard(self, season_id: str, include_projections: bool = True) -> list[dict]:
+        final_points: dict[str, list[int]] = defaultdict(list)
+        projected_points: dict[str, list[int]] = defaultdict(list)
+        with self._db() as database:
+            for row in database.execute("SELECT points,username FROM sc_final_points point JOIN sc_imported_courses course ON course.id=point.course_id WHERE course.season_id=?", (season_id,)):
+                final_points[row["username"]].append(row["points"])
+                projected_points[row["username"]].append(row["points"])
+            if include_projections:
+                for row in database.execute("SELECT result.username,result.rank FROM sc_course_results result JOIN sc_imported_courses course ON course.id=result.course_id WHERE course.season_id=? AND course.lifecycle='active' AND result.is_final=0", (season_id,)):
+                    projected_points[row["username"]].append(self.calculate_points(row["rank"]))
+        best_count = config.get_path("scoring.best_courses_count", 0)
+        minimum = config.get_path("scoring.min_courses_required", 0)
+        def scored(points):
+            values = sorted(points, reverse=True)
+            return sum(values[:best_count] if best_count else values)
+        usernames = set(final_points) | set(projected_points)
+        leaderboard = [{
+            "username": username,
+            "total_points": scored(final_points[username]),
+            "projected_points": scored(projected_points[username]),
+            "courses_completed": len(final_points[username]),
+            "qualified": not minimum or len(final_points[username]) >= minimum,
+        } for username in usernames]
+        leaderboard.sort(key=lambda row: (not row["qualified"], -row["total_points"], -row["projected_points"], row["username"]))
+        for position, row in enumerate(leaderboard, start=1):
+            row["position"] = position
+        return leaderboard
+
+    async def get_message(self, season_id: str):
+        with self._db() as database:
+            return database.execute("SELECT channel_id,message_id FROM sc_season_messages WHERE season_id=? AND message_type='dashboard'", (season_id,)).fetchone()
+
+    async def store_message(self, season_id: str, channel_id: int, message_id: int) -> None:
+        with self._db() as database:
+            database.execute("""INSERT INTO sc_season_messages VALUES(?,?,?,?)
+                ON CONFLICT(season_id,message_type) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id""", (season_id, "dashboard", channel_id, message_id))
+
+    async def claim_final_announcement(self, course_id: str) -> bool:
+        with self._db() as database:
+            result = database.execute("UPDATE sc_imported_courses SET announcement_claimed_at=? WHERE id=? AND final_imported_at IS NOT NULL AND announced_at IS NULL AND announcement_claimed_at IS NULL", (int(time.time()), course_id))
+            return result.rowcount == 1
+
+    async def mark_final_announced(self, course_id: str) -> None:
+        with self._db() as database:
+            database.execute("UPDATE sc_imported_courses SET announced_at=?, announcement_claimed_at=NULL WHERE id=?", (int(time.time()), course_id))
+
+    async def release_final_announcement(self, course_id: str) -> None:
+        with self._db() as database:
+            database.execute("UPDATE sc_imported_courses SET announcement_claimed_at=NULL WHERE id=? AND announced_at IS NULL", (course_id,))
+
+    @staticmethod
+    def calculate_points(position: int) -> int:
+        return {1: 30, 2: 25, 3: 21, 4: 18, 5: 16, 6: 14, 7: 12, 8: 10, 9: 8, 10: 6}.get(position, 4 if position <= 15 else 3 if position <= 20 else 2 if position <= 25 else 1 if position <= 30 else 0)
+
+
+db_manager = DatabaseManager()

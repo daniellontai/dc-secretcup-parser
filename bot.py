@@ -21,5 +21,15 @@ async def secretcourse(interaction:discord.Interaction,action:str,subaction:str=
   r=bot.synchronizer.last_report if bot.synchronizer else None;await interaction.response.send_message('No sync yet.' if not r else f'Revision: {r.revision}; warnings: {len(r.warnings)}',ephemeral=True);return
  if action=='leaderboard' and subaction:
   rows=await db_manager.get_season_leaderboard(subaction);await interaction.response.send_message('\n'.join(f"{x['position']}. {x['username']} — {x['total_points']} pts" for x in rows) or 'No results.');return
- await interaction.response.send_message('Actions: `update`, `leaderboard <season-id>`, `debug sync`.',ephemeral=True)
+ if action=='courses' and subaction:
+  courses=await db_manager.get_season_courses(subaction);await interaction.response.send_message('\n'.join(f"{course['course_name']} — {course['lifecycle']}" for course in courses) or 'No imported cup courses.');return
+ if action=='config' and subaction=='default-channel':
+  try: channel_id=int(value)
+  except (TypeError,ValueError):await interaction.response.send_message('Provide a numeric channel ID.',ephemeral=True);return
+  config.set_path('discord.default_channel_id',channel_id);await interaction.response.send_message(f'Default channel set to {channel_id}.',ephemeral=True);return
+ if action=='config' and subaction=='season-channel':
+  try: season_id,channel_text=value.split(maxsplit=1);channel_id=int(channel_text)
+  except (AttributeError,ValueError):await interaction.response.send_message('Use `config season-channel <season-id> <channel-id>`.',ephemeral=True);return
+  config.set_path(f'discord.season_channel_ids.{season_id}',channel_id);await interaction.response.send_message(f'Channel for {season_id} set to {channel_id}.',ephemeral=True);return
+ await interaction.response.send_message('Actions: `update`, `leaderboard <season-id>`, `courses <season-id>`, `debug sync`, `config default-channel <channel-id>`, `config season-channel <season-id> <channel-id>`.',ephemeral=True)
 if __name__=='__main__':bot.run(config.get('discord_token'))

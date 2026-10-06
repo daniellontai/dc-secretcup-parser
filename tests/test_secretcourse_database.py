@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from db_manager import DatabaseManager
+from config import config
 from secretcourse_types import ExportCourse, ExportSeason, LeaderboardEntry, StatusExport
 
 
@@ -52,6 +53,38 @@ class SecretCourseDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(courses["sumot-rerun"]["lifecycle"], "cancelled")
         self.assertEqual(courses["sumot"]["lifecycle"], "expired")
         self.assertEqual([(row["username"], row["total_points"]) for row in leaderboard], [("thndr", 30)])
+
+    async def test_leaderboard_keeps_final_points_separate_from_active_projections(self):
+        await self.database.apply_status(self.status, seen_at=50)
+        await self.database.finalize_course("sumot", 60, [entry("thndr")])
+        await self.database.replace_live_results("sumot-rerun", [entry("shakur"), entry("thndr", 36000)])
+
+        leaderboard = await self.database.get_season_leaderboard("cc-s3", include_projections=True)
+
+        self.assertEqual(
+            [(row["username"], row["total_points"], row["projected_points"], row["courses_completed"]) for row in leaderboard],
+            [("thndr", 30, 55, 1), ("shakur", 0, 30, 0)],
+        )
+
+    async def test_scoring_honors_best_course_count_and_minimum_participation(self):
+        previous_best = config.get_path("scoring.best_courses_count")
+        previous_minimum = config.get_path("scoring.min_courses_required")
+        config.set_path("scoring.best_courses_count", 1)
+        config.set_path("scoring.min_courses_required", 2)
+        try:
+            await self.database.apply_status(self.status, seen_at=50)
+            await self.database.finalize_course("sumot", 60, [entry("thndr")])
+            await self.database.finalize_course("sumot-rerun", 61, [entry("shakur"), entry("thndr", 36000)])
+
+            leaderboard = await self.database.get_season_leaderboard("cc-s3", include_projections=False)
+
+            self.assertEqual(
+                [(row["username"], row["total_points"], row["courses_completed"], row["qualified"]) for row in leaderboard],
+                [("thndr", 30, 2, True), ("shakur", 30, 1, False)],
+            )
+        finally:
+            config.set_path("scoring.best_courses_count", previous_best)
+            config.set_path("scoring.min_courses_required", previous_minimum)
 
 
 if __name__ == "__main__":
