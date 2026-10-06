@@ -19,7 +19,14 @@ class MessageManager:
    if channel:
     courses=await self.sync.database.get_season_courses(season['id'])
     lines=[f"{c['course_name']} — {c['lifecycle']}" for c in courses] or ['No cup courses']
-    await channel.send(embed=discord.Embed(title=f"🏆 {season['name']}",description='\n'.join(lines),color=discord.Color.green()))
+    embed=discord.Embed(title=f"🏆 {season['name']}",description='\n'.join(lines),color=discord.Color.green())
+    saved=await self.sync.database.get_message(season['id'])
+    try:
+     message=await channel.fetch_message(saved[1]) if saved and saved[0]==channel.id else None
+    except discord.NotFound: message=None
+    if message: await message.edit(embed=embed)
+    else:
+     message=await channel.send(embed=embed);await self.sync.database.store_message(season['id'],channel.id,message.id)
   return report
  async def force_update(self):await self.update_all_messages();return True
 message_manager=MessageManager()

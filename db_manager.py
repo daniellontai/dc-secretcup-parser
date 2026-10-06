@@ -31,6 +31,10 @@ class DatabaseManager:
   with self._db() as d:return [dict(zip(('id','course_name','starts_at','expires_at','lifecycle','finalized_at'),r)) for r in d.execute('SELECT id,course_name,starts_at,expires_at,lifecycle,finalized_at FROM sc_imported_courses WHERE season_id=?',(s,))]
  async def get_imported_seasons(self):
   with self._db() as d:return [dict(zip(('id','name','starts_at','expires_at'),r)) for r in d.execute('SELECT id,name,starts_at,expires_at FROM sc_imported_seasons ORDER BY starts_at,id')]
+ async def get_message(self,season_id):
+  with self._db() as d:return d.execute('SELECT channel_id,message_id FROM sc_season_messages WHERE season_id=? AND message_type=?',(season_id,'dashboard')).fetchone()
+ async def store_message(self,season_id,channel_id,message_id):
+  with self._db() as d:d.execute('CREATE TABLE IF NOT EXISTS sc_season_messages(season_id TEXT,message_type TEXT,channel_id INTEGER,message_id INTEGER,PRIMARY KEY(season_id,message_type))');d.execute('INSERT OR REPLACE INTO sc_season_messages VALUES(?,?,?,?)',(season_id,'dashboard',channel_id,message_id))
  async def get_season_leaderboard(self,s,include_projections=True):
   with self._db() as d:r=d.execute('SELECT username,points FROM sc_final_points p JOIN sc_imported_courses c ON c.id=p.course_id WHERE c.season_id=?',(s,)).fetchall()
   x={}
