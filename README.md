@@ -1,6 +1,6 @@
 # SecretCourse Discord Bot
 
-Discord bot for tracking TaystJK game server secret course competitions. Monitors server logs for course events, tracks player scores across seasons, and posts live leaderboard updates to Discord.
+Discord bot for tracking TaystJK game server Secret Course competitions. It polls JKA's `secretcourses-status.json` and per-course leaderboard exports, tracks cup scores by JKA season/course IDs, and posts live Discord dashboards.
 
 ## Requirements
 
@@ -33,8 +33,7 @@ pip install -r requirements.txt
 
 2. Edit `config.json` with your settings:
    - `discord_token` - Bot token from [Discord Developer Portal](https://discord.com/developers/applications)
-   - `main_db_path` - Path to TaystJK game's `data.db`
-   - `log_file_path` - Path to TaystJK server log file
+   - `secretcourses.export_root` - Directory containing JKA's `secretcourses/` exports
    - `bot_db_path` - Path for bot's SQLite database (created automatically)
    - `announcement_channel_id` - Discord channel ID for live messages
    - `admin_role` - Role name required to run admin commands
@@ -122,6 +121,4 @@ All commands use `/secretcourse <action> [subaction] [value]`.
    /secretcourse test
    ```
 
-The bot will automatically track courses from server logs and update live leaderboard messages in the configured channel.
-
-For consistency's sake, create the season in the Discord bot first, then add the SecretCourses (/addsecretcourse) on the JKA server.
+JKA owns course schedules, finalization, and season names. The bot imports cup courses automatically; permanent courses are ignored. All seasons use the default channel unless `discord.season_channel_ids` provides an override.
