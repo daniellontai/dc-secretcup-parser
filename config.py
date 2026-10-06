@@ -5,6 +5,7 @@ import os
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 class Config:
     """Configuration manager for the bot"""
@@ -18,33 +19,38 @@ class Config:
         """Load configuration from file or create defaults"""
         default_config = {
             "discord_token": "",
-            "main_db_path": "/home/jka/jka-server-staging/taystjk/data.db",
-            "log_file_path": "/home/jka/jka-server-staging/logs/jka-server.log",
             "bot_db_path": "./bot_data.db",
             "admin_role": "Admin",
-            "update_interval": 300,  # 5 minutes in seconds
             "log_level": "minimal",  # off, minimal, debug
-            "announcement_channel_id": None,
-            "show_times_expired": True,
-            "courses_per_row": 2,
-            "message_toggles": {
-                "season_summary": True,
-                "season_standings": True, 
-                "course_grid": True
+            "secretcourses": {
+                "export_root": "/srv/jka/taystjk",
+                "poll_interval_seconds": 30,
+                "jka_style": 1,
             },
-            "live_messages_enabled": False,
-            "message_update_interval": 300,  # 5 minutes
-            "show_spoilers": True,
-            "top_players_count": 5,
-            "min_courses_required": 0,  # 0 = disabled (no minimum participation requirement)
-            "best_courses_count": 0,    # 0 = all courses count toward score
+            "discord": {
+                "default_channel_id": None,
+                "season_channel_ids": {},
+                "top_players_count": 10,
+                "courses_per_row": 2,
+                "show_scheduled_courses": True,
+                "show_final_times": True,
+                "message_toggles": {
+                    "season_summary": True,
+                    "season_standings": True,
+                    "course_grid": True,
+                },
+            },
+            "scoring": {
+                "min_courses_required": 0,
+                "best_courses_count": 0,
+            },
         }
         
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r') as f:
                     loaded_config = json.load(f)
-                    default_config.update(loaded_config)
+                    self._merge_defaults(default_config, loaded_config)
             
             self.config = default_config
             self.save_config()
@@ -68,6 +74,36 @@ class Config:
     def set(self, key: str, value):
         """Set configuration value"""
         self.config[key] = value
+        self.save_config()
+
+    @staticmethod
+    def _merge_defaults(defaults: dict, overrides: dict) -> None:
+        for key, value in overrides.items():
+            if isinstance(value, dict) and isinstance(defaults.get(key), dict):
+                Config._merge_defaults(defaults[key], value)
+            else:
+                defaults[key] = value
+
+    def get_path(self, path: str, default: Any = None) -> Any:
+        """Return a nested configuration value addressed with dots."""
+        value: Any = self.config
+        for part in path.split("."):
+            if not isinstance(value, dict) or part not in value:
+                return default
+            value = value[part]
+        return value
+
+    def set_path(self, path: str, value: Any) -> None:
+        """Set a nested configuration value without replacing sibling keys."""
+        parts = path.split(".")
+        target = self.config
+        for part in parts[:-1]:
+            child = target.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                target[part] = child
+            target = child
+        target[parts[-1]] = value
         self.save_config()
     
     def setup_logging(self):

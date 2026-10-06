@@ -1,17 +1,28 @@
 {
   "discord_token": "",
-  "main_db_path": "/home/user/jka-server-root/taystjk/data.db",
-  "log_file_path": "/home/user/jka-server-root/logs/jka-server.log",
   "bot_db_path": "./bot_data.db",
   "admin_role": "Admin",
-  "update_interval": 300,
   "log_level": "minimal",
-  "announcement_channel_id": null,
-  "show_times_expired": true,
-  "courses_per_row": 3,
-  "message_toggles": {
-    "season_summary": true,
-    "season_standings": true,
-    "course_grid": true
+  "secretcourses": {
+    "export_root": "/home/user/jka-server-root/taystjk",
+    "poll_interval_seconds": 30,
+    "jka_style": 1
+  },
+  "discord": {
+    "default_channel_id": null,
+    "season_channel_ids": {},
+    "top_players_count": 10,
+    "courses_per_row": 2,
+    "show_scheduled_courses": true,
+    "show_final_times": true,
+    "message_toggles": {
+      "season_summary": true,
+      "season_standings": true,
+      "course_grid": true
+    }
+  },
+  "scoring": {
+    "min_courses_required": 0,
+    "best_courses_count": 0
   }
 }
