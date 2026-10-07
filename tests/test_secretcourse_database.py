@@ -74,8 +74,8 @@ class SecretCourseDatabaseTests(unittest.IsolatedAsyncioTestCase):
         leaderboard = await self.database.get_season_leaderboard("cc-s3", include_projections=True)
 
         self.assertEqual(
-            [(row["username"], row["total_points"], row["projected_points"], row["courses_completed"]) for row in leaderboard],
-            [("thndr", 30, 55, 1), ("shakur", 0, 30, 0)],
+            [(row["username"], row["total_points"], row["projected_points"], row["courses_completed"], row["courses_run"]) for row in leaderboard],
+            [("thndr", 30, 55, 1, 2), ("shakur", 0, 30, 0, 1)],
         )
 
     async def test_scoring_honors_best_course_count_and_minimum_participation(self):

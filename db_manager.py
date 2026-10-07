@@ -98,13 +98,16 @@ class DatabaseManager:
     async def get_season_leaderboard(self, season_id: str, include_projections: bool = True) -> list[dict]:
         final_points: dict[str, list[int]] = defaultdict(list)
         projected_points: dict[str, list[int]] = defaultdict(list)
+        courses_run: dict[str, set[str]] = defaultdict(set)
         with self._db() as database:
-            for row in database.execute("SELECT points,username FROM sc_final_points point JOIN sc_imported_courses course ON course.id=point.course_id WHERE course.season_id=?", (season_id,)):
+            for row in database.execute("SELECT point.course_id,points,username FROM sc_final_points point JOIN sc_imported_courses course ON course.id=point.course_id WHERE course.season_id=?", (season_id,)):
                 final_points[row["username"]].append(row["points"])
                 projected_points[row["username"]].append(row["points"])
+                courses_run[row["username"]].add(row["course_id"])
             if include_projections:
-                for row in database.execute("SELECT result.username,result.rank FROM sc_course_results result JOIN sc_imported_courses course ON course.id=result.course_id WHERE course.season_id=? AND course.lifecycle='active' AND result.is_final=0", (season_id,)):
+                for row in database.execute("SELECT result.course_id,result.username,result.rank FROM sc_course_results result JOIN sc_imported_courses course ON course.id=result.course_id WHERE course.season_id=? AND course.lifecycle='active' AND result.is_final=0", (season_id,)):
                     projected_points[row["username"]].append(self.calculate_points(row["rank"]))
+                    courses_run[row["username"]].add(row["course_id"])
         best_count = config.get_path("scoring.best_courses_count", 0)
         minimum = config.get_path("scoring.min_courses_required", 0)
         def scored(points):
@@ -116,6 +119,7 @@ class DatabaseManager:
             "total_points": scored(final_points[username]),
             "projected_points": scored(projected_points[username]),
             "courses_completed": len(final_points[username]),
+            "courses_run": len(courses_run[username]),
             "qualified": not minimum or len(final_points[username]) >= minimum,
         } for username in usernames]
         leaderboard.sort(key=lambda row: (not row["qualified"], -row["total_points"], -row["projected_points"], row["username"]))

@@ -306,9 +306,9 @@ class MessageFormatter:
         if not leaderboard:
             embed.add_field(name="Detailed standings", value="No results yet", inline=False)
             return embed
-        lines = ["Pos | Player     | Score | Projected | Courses", "----|------------|-------|-----------|--------"]
+        lines = ["Pos | Player     | Score | Projected | Courses Ran", "----|------------|-------|-----------|------------"]
         for row in leaderboard[:top_players]:
-            lines.append(f"{row['position']:>3} | {row['username'][:10]:<10} | {row['total_points']:>5} | {row['projected_points']:>9} | {row['courses_completed']:>6}")
+            lines.append(f"{row['position']:>3} | {row['username'][:10]:<10} | {row['total_points']:>5} | {row['projected_points']:>9} | {row['courses_run']:>11}")
         embed.add_field(name="Detailed standings", value=("```\n" + "\n".join(lines) + "\n```")[:1024], inline=False)
         return embed
 
