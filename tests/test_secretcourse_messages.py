@@ -66,6 +66,17 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("0 pts (30 projected)", embed.fields[0].value)
 
+    async def test_dashboard_prioritizes_active_courses_and_discloses_overflow(self):
+        courses = [
+            {"id": f"final-{index}", "course_name": f"Final {index}", "starts_at": 1, "expires_at": 2, "lifecycle": "expired"}
+            for index in range(25)
+        ] + [{"id": "active-now", "course_name": "Active now", "starts_at": 1, "expires_at": 2, "lifecycle": "active"}]
+
+        embed = MessageFormatter.create_season_dashboard({"id": "cc-s3", "name": "Cup"}, courses, {}, True)
+
+        self.assertEqual(embed.fields[0].name, "Active now")
+        self.assertEqual(embed.fields[-1].name, "More courses")
+
     async def test_final_announcement_is_sent_once_across_repeated_reports(self):
         class Message:
             def __init__(self, message_id): self.id = message_id
