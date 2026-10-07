@@ -41,11 +41,16 @@ class SecretCourseSource:
         return [entry for entry in entries if entry.style == self.jka_style]
 
     async def _load_json(self, path: Path) -> dict[str, Any]:
+        resolved = path.resolve()
         try:
-            text = path.read_text(encoding="utf-8")
+            resolved.relative_to(self.export_root)
+        except ValueError as error:
+            raise SecretCourseSourceError(f"JSON export path escapes export root: {path}") from error
+        try:
+            text = resolved.read_text(encoding="utf-8")
             payload = json.loads(text)
-        except (OSError, json.JSONDecodeError) as error:
-            raise SecretCourseSourceError(f"could not read JSON export {path}: {error}") from error
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SecretCourseSourceError(f"could not read JSON export {resolved}: {error}") from error
         if not isinstance(payload, dict):
             raise SecretCourseSourceError(f"JSON export {path} must contain an object")
         return payload

@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -105,6 +106,20 @@ class SecretCourseSourceTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(SecretCourseSourceError):
             await self.source.load_leaderboard(status.courses[0], status.revision)
+
+    async def test_rejects_status_export_reached_through_an_escaping_symlink(self):
+        outside = Path(self.temporary_directory.name).with_name(Path(self.temporary_directory.name).name + "-outside")
+        outside.mkdir()
+        self.addCleanup(shutil.rmtree, outside, ignore_errors=True)
+        (outside / "secretcourses-status.json").write_text(
+            json.dumps({"schema_version": 2, "revision": "outside", "seasons": [], "courses": []}),
+            encoding="utf-8",
+        )
+        self.status_path.parent.rmdir()
+        self.status_path.parent.symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaises(SecretCourseSourceError):
+            await self.source.load_status()
 
     async def test_rejects_leaderboard_with_mismatched_identity_or_revision(self):
         cup = self.cup_course()

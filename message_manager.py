@@ -1,11 +1,14 @@
 """Discord dashboard rendering and idempotent final-course delivery."""
 
 import asyncio
+import logging
 
 import discord
 
 from config import config
 from formatters import MessageFormatter
+
+logger = logging.getLogger(__name__)
 
 
 class MessageManager:
@@ -24,9 +27,15 @@ class MessageManager:
         if self.running:
             return
         self.running = True
-        while self.running:
-            await self.update_all_messages()
-            await asyncio.sleep(config.get_path("secretcourses.poll_interval_seconds", 30))
+        try:
+            while self.running:
+                try:
+                    await self.update_all_messages()
+                except Exception:
+                    logger.exception("Secret Course message update failed")
+                await asyncio.sleep(config.get_path("secretcourses.poll_interval_seconds", 30))
+        finally:
+            self.running = False
 
     def _channel_for(self, season_id: str):
         if self.bot is None:
@@ -50,8 +59,13 @@ class MessageManager:
                 continue
             courses = await database.get_season_courses(season["id"])
             results = {course["id"]: await database.get_course_results(course["id"]) for course in courses}
+            toggles = config.get_path("discord.message_toggles", {})
+            leaderboard = await database.get_season_leaderboard(season["id"]) if toggles.get("season_standings", True) else []
             embed = MessageFormatter.create_season_dashboard(
-                season, courses, results, config.get_path("discord.show_final_times", True)
+                season, courses, results, config.get_path("discord.show_final_times", True), leaderboard,
+                toggles.get("season_summary", True), toggles.get("season_standings", True),
+                toggles.get("course_grid", True), config.get_path("discord.show_scheduled_courses", True),
+                config.get_path("discord.top_players_count", 10), config.get_path("discord.courses_per_row", 2),
             )
             saved = await database.get_message(season["id"])
             message = None
@@ -70,9 +84,10 @@ class MessageManager:
 
     async def _announce_final_courses(self, report) -> None:
         database = self.synchronizer.database
-        for course_id in report.finalized_course_ids:
-            course = await database.get_course(course_id)
-            if course is None or not await database.claim_final_announcement(course_id):
+        await database.release_pending_final_announcement_claims()
+        for course in await database.get_unannounced_final_courses():
+            course_id = course["id"]
+            if not await database.claim_final_announcement(course_id):
                 continue
             channel = self._channel_for(course["season_id"])
             try:

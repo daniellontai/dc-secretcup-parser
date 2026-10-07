@@ -41,7 +41,7 @@ class DatabaseManager:
                 if course.type != "cup":
                     continue
                 database.execute("""INSERT INTO sc_imported_courses (id,season_id,course_name,starts_at,expires_at,lifecycle,activated_at,finalized_at,revision,last_seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)
-                    ON CONFLICT(id) DO UPDATE SET season_id=excluded.season_id, course_name=excluded.course_name, starts_at=excluded.starts_at, expires_at=excluded.expires_at, lifecycle=excluded.lifecycle, activated_at=excluded.activated_at, finalized_at=excluded.finalized_at, revision=excluded.revision, last_seen_at=excluded.last_seen_at, retired_at=NULL""", (course.id, course.season_id, course.course_name, course.starts_at, course.expires_at, course.lifecycle, course.activated_at, course.finalized_at, status.revision, seen_at))
+                    ON CONFLICT(id) DO UPDATE SET season_id=excluded.season_id, course_name=excluded.course_name, starts_at=excluded.starts_at, expires_at=excluded.expires_at, lifecycle=CASE WHEN excluded.lifecycle='scheduled' THEN 'scheduled' ELSE lifecycle END, activated_at=excluded.activated_at, revision=excluded.revision, last_seen_at=excluded.last_seen_at, retired_at=NULL""", (course.id, course.season_id, course.course_name, course.starts_at, course.expires_at, course.lifecycle, course.activated_at, course.finalized_at, status.revision, seen_at))
 
     @staticmethod
     def _insert_results(database: sqlite3.Connection, course_id: str, entries: Sequence[LeaderboardEntry], is_final: bool) -> None:
@@ -55,6 +55,7 @@ class DatabaseManager:
                 return
             database.execute("DELETE FROM sc_course_results WHERE course_id=? AND is_final=0", (course_id,))
             self._insert_results(database, course_id, entries, False)
+            database.execute("UPDATE sc_imported_courses SET lifecycle='active', finalized_at=NULL WHERE id=?", (course_id,))
 
     async def finalize_course(self, course_id: str, finalized_at: int, entries: Sequence[LeaderboardEntry]) -> bool:
         with self._db() as database:
@@ -141,6 +142,14 @@ class DatabaseManager:
     async def release_final_announcement(self, course_id: str) -> None:
         with self._db() as database:
             database.execute("UPDATE sc_imported_courses SET announcement_claimed_at=NULL WHERE id=? AND announced_at IS NULL", (course_id,))
+
+    async def release_pending_final_announcement_claims(self) -> None:
+        with self._db() as database:
+            database.execute("UPDATE sc_imported_courses SET announcement_claimed_at=NULL WHERE announced_at IS NULL")
+
+    async def get_unannounced_final_courses(self) -> list[dict]:
+        with self._db() as database:
+            return [dict(row) for row in database.execute("SELECT * FROM sc_imported_courses WHERE final_imported_at IS NOT NULL AND announced_at IS NULL")]
 
     @staticmethod
     def calculate_points(position: int) -> int:

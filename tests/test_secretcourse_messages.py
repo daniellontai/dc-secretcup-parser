@@ -94,3 +94,36 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(channel.sent[1]["embed"].title, "🏁 Final finalized")
         finally:
             config.set_path("discord.default_channel_id", previous_channel)
+
+    async def test_failed_announcement_is_retried_after_the_finalization_report_is_gone(self):
+        class Message:
+            def __init__(self, message_id): self.id = message_id
+            async def edit(self, **kwargs): pass
+        class Channel:
+            def __init__(self): self.id, self.sent, self.fail_final = 9, [], True
+            async def send(self, **kwargs):
+                if kwargs['embed'].title.startswith('🏁') and self.fail_final:
+                    self.fail_final = False
+                    raise RuntimeError('temporary Discord failure')
+                self.sent.append(kwargs)
+                return Message(len(self.sent))
+            async def fetch_message(self, message_id): return Message(message_id)
+        class Bot:
+            def __init__(self, channel): self.channel = channel
+            def get_channel(self, channel_id): return self.channel
+        class Synchronizer:
+            def __init__(self, database): self.database, self.calls = database, 0
+            async def sync_once(self):
+                self.calls += 1
+                return SyncReport('rev-1', 50, finalized_course_ids=('final',) if self.calls == 1 else ())
+
+        previous_channel = config.get_path('discord.default_channel_id')
+        config.set_path('discord.default_channel_id', 9)
+        try:
+            channel, manager = Channel(), MessageManager()
+            manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            await manager.update_all_messages()
+            self.assertEqual([item['embed'].title for item in channel.sent].count('🏁 Final finalized'), 1)
+        finally:
+            config.set_path('discord.default_channel_id', previous_channel)

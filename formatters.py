@@ -287,27 +287,35 @@ class MessageFormatter:
         return embed
 
     @staticmethod
-    def create_season_dashboard(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool) -> discord.Embed:
+    def create_season_dashboard(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool, leaderboard: List[Dict] | None = None, show_summary: bool = True, show_standings: bool = True, show_courses: bool = True, show_scheduled: bool = True, top_players: int = 10, courses_per_row: int = 2) -> discord.Embed:
         """Render one imported JKA season without relying on legacy bot seasons."""
         embed = discord.Embed(title=f"🏆 {season['name']}", color=discord.Color.green())
+        if show_summary:
+            embed.description = "Imported from JKA Secret Course exports."
+        if show_standings and leaderboard:
+            standings = "\n".join(f"{row['position']}. {row['username']} — {row['total_points']} pts" for row in leaderboard[:top_players])
+            embed.add_field(name="Season standings", value=standings[:1024], inline=False)
+        if not show_courses:
+            return embed
+        courses = [course for course in courses if show_scheduled or course["lifecycle"] != "scheduled"]
         if not courses:
             embed.description = "No cup courses"
             return embed
 
-        for course in courses:
+        for course in courses[:25-len(embed.fields)]:
             lifecycle = course["lifecycle"]
             if lifecycle == "scheduled":
                 value = f"Scheduled: <t:{course['starts_at']}:F> – <t:{course['expires_at']}:F>"
             else:
                 lines = []
-                for result in results.get(course["id"], []):
+                for result in results.get(course["id"], [])[:top_players]:
                     line = f"{result['rank']}. {result['username']}"
                     if lifecycle == "expired" and show_final_times:
                         line += f" — {result['time']}"
                     lines.append(line)
                 label = "Finalized" if lifecycle == "expired" else lifecycle.title()
                 value = f"{label}\n" + ("\n".join(lines) if lines else "No rankings yet")
-            embed.add_field(name=course["course_name"], value=value, inline=False)
+            embed.add_field(name=course["course_name"][:256], value=value[:1024], inline=courses_per_row > 1)
         return embed
 
     @staticmethod

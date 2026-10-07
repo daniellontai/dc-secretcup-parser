@@ -8,6 +8,10 @@ from message_manager import message_manager
 from secretcourse_source import SecretCourseSource
 from secretcourse_sync import SecretCourseSynchronizer
 config.setup_logging();logger=logging.getLogger(__name__)
+def is_admin(interaction):
+ user=getattr(interaction,'user',None);permissions=getattr(user,'guild_permissions',None)
+ if getattr(permissions,'administrator',False):return True
+ return any(getattr(role,'name',None)==config.get('admin_role') for role in getattr(user,'roles',()))
 class SecretCourseBot(commands.Bot):
  def __init__(self):super().__init__(command_prefix='!',intents=discord.Intents.default(),help_command=None);self.synchronizer=None
  async def setup_hook(self):
@@ -18,18 +22,31 @@ bot=SecretCourseBot()
 async def secretcourse(interaction:discord.Interaction,action:str,subaction:str=None,value:str=None):
  if action=='update':await message_manager.force_update();await interaction.response.send_message('Updated.',ephemeral=True);return
  if action=='debug' and subaction=='sync':
-  r=bot.synchronizer.last_report if bot.synchronizer else None;await interaction.response.send_message('No sync yet.' if not r else f'Revision: {r.revision}; warnings: {len(r.warnings)}',ephemeral=True);return
+  r=bot.synchronizer.last_report if bot.synchronizer else None;await interaction.response.send_message('No sync yet.' if not r else f"Revision: {r.revision}; synced: {r.synced_at}; warnings: {'; '.join(r.warnings) or 'none'}",ephemeral=True);return
  if action=='leaderboard' and subaction:
   rows=await db_manager.get_season_leaderboard(subaction);await interaction.response.send_message('\n'.join(f"{x['position']}. {x['username']} — {x['total_points']} pts" for x in rows) or 'No results.');return
  if action=='courses' and subaction:
   courses=await db_manager.get_season_courses(subaction);await interaction.response.send_message('\n'.join(f"{course['course_name']} — {course['lifecycle']}" for course in courses) or 'No imported cup courses.');return
  if action=='config' and subaction=='default-channel':
+  if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
   try: channel_id=int(value)
   except (TypeError,ValueError):await interaction.response.send_message('Provide a numeric channel ID.',ephemeral=True);return
   config.set_path('discord.default_channel_id',channel_id);await interaction.response.send_message(f'Default channel set to {channel_id}.',ephemeral=True);return
  if action=='config' and subaction=='season-channel':
+  if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
   try: season_id,channel_text=value.split(maxsplit=1);channel_id=int(channel_text)
   except (AttributeError,ValueError):await interaction.response.send_message('Use `config season-channel <season-id> <channel-id>`.',ephemeral=True);return
   config.set_path(f'discord.season_channel_ids.{season_id}',channel_id);await interaction.response.send_message(f'Channel for {season_id} set to {channel_id}.',ephemeral=True);return
- await interaction.response.send_message('Actions: `update`, `leaderboard <season-id>`, `courses <season-id>`, `debug sync`, `config default-channel <channel-id>`, `config season-channel <season-id> <channel-id>`.',ephemeral=True)
+ if action=='config' and subaction in {'scoring min','scoring best'}:
+  if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
+  try: count=int(value);assert count>=0
+  except (TypeError,ValueError,AssertionError):await interaction.response.send_message('Provide a non-negative number.',ephemeral=True);return
+  key='scoring.min_courses_required' if subaction=='scoring min' else 'scoring.best_courses_count'
+  config.set_path(key,count);await interaction.response.send_message('Scoring configuration updated.',ephemeral=True);return
+ if action=='toggle' and subaction in {'summary','standings','grid'}:
+  if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
+  if value not in {'on','off'}:await interaction.response.send_message('Use `on` or `off`.',ephemeral=True);return
+  key={'summary':'season_summary','standings':'season_standings','grid':'course_grid'}[subaction]
+  config.set_path(f'discord.message_toggles.{key}',value=='on');await interaction.response.send_message('Message toggle updated.',ephemeral=True);return
+ await interaction.response.send_message('Actions: `update`, `leaderboard <season-id>`, `courses <season-id>`, `debug sync`, `config default-channel <channel-id>`, `config season-channel <season-id> <channel-id>`, `config scoring min|best <count>`, `toggle summary|standings|grid on|off`.',ephemeral=True)
 if __name__=='__main__':bot.run(config.get('discord_token'))
