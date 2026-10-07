@@ -293,7 +293,7 @@ class MessageFormatter:
         if show_summary:
             embed.description = "Imported from JKA Secret Course exports."
         if show_standings and leaderboard:
-            standings = "\n".join(f"{row['position']}. {row['username']} — {row['total_points']} pts" for row in leaderboard[:top_players])
+            standings = "\n".join(f"{row['position']}. {row['username']} — {row['total_points']} pts ({row.get('projected_points', row['total_points'])} projected)" for row in leaderboard[:top_players])
             embed.add_field(name="Season standings", value=standings[:1024], inline=False)
         if not show_courses:
             return embed
@@ -302,7 +302,7 @@ class MessageFormatter:
             embed.description = "No cup courses"
             return embed
 
-        for course in courses[:25-len(embed.fields)]:
+        for index, course in enumerate(courses):
             lifecycle = course["lifecycle"]
             if lifecycle == "scheduled":
                 value = f"Scheduled: <t:{course['starts_at']}:F> – <t:{course['expires_at']}:F>"
@@ -315,7 +315,12 @@ class MessageFormatter:
                     lines.append(line)
                 label = "Finalized" if lifecycle == "expired" else lifecycle.title()
                 value = f"{label}\n" + ("\n".join(lines) if lines else "No rankings yet")
-            embed.add_field(name=course["course_name"][:256], value=value[:1024], inline=courses_per_row > 1)
+            name, value = course["course_name"][:256], value[:1024]
+            if len(embed.fields) >= 25 or len(embed) + len(name) + len(value) > 5900:
+                if len(embed.fields) < 25 and len(embed) < 5850:
+                    embed.add_field(name="More courses", value=f"{len(courses) - index} courses omitted; use `/secretcourse courses {season['id']}`.", inline=False)
+                break
+            embed.add_field(name=name, value=value, inline=courses_per_row > 1)
         return embed
 
     @staticmethod

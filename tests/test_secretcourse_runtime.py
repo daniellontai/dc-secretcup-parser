@@ -39,7 +39,7 @@ class SecretCourseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             override = Interaction()
             await runtime.secretcourse.callback(override, "config", "season-channel", "cc-s3 456")
             scoring = Interaction()
-            await runtime.secretcourse.callback(scoring, "config", "scoring min", "2")
+            await runtime.secretcourse.callback(scoring, "config", "scoring", "min 2")
             toggle = Interaction()
             await runtime.secretcourse.callback(toggle, "toggle", "standings", "off")
             legacy = Interaction()

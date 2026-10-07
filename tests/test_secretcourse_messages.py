@@ -55,6 +55,17 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("35.000", body)
         self.assertIn("1. shakur — 36.000", body)
 
+    async def test_dashboard_standings_show_projected_points_for_active_courses(self):
+        courses = await self.database.get_season_courses("cc-s3")
+        results = {item["id"]: await self.database.get_course_results(item["id"]) for item in courses}
+        standings = await self.database.get_season_leaderboard("cc-s3")
+
+        embed = MessageFormatter.create_season_dashboard(
+            {"id": "cc-s3", "name": "Climb Cup Season 3"}, courses, results, True, standings
+        )
+
+        self.assertIn("0 pts (30 projected)", embed.fields[0].value)
+
     async def test_final_announcement_is_sent_once_across_repeated_reports(self):
         class Message:
             def __init__(self, message_id): self.id = message_id

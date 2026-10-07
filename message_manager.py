@@ -16,6 +16,7 @@ class MessageManager:
         self.bot = None
         self.synchronizer = None
         self.running = False
+        self._update_lock = asyncio.Lock()
 
     def set_bot(self, bot) -> None:
         self.bot = bot
@@ -47,6 +48,10 @@ class MessageManager:
         return self.bot.get_channel(channel_id) if channel_id else None
 
     async def update_all_messages(self):
+        async with self._update_lock:
+            return await self._update_all_messages()
+
+    async def _update_all_messages(self):
         if self.synchronizer is None:
             return None
         report = await self.synchronizer.sync_once()
@@ -54,31 +59,25 @@ class MessageManager:
             return report
         database = self.synchronizer.database
         for season in await database.get_imported_seasons():
-            channel = self._channel_for(season["id"])
-            if channel is None:
-                continue
-            courses = await database.get_season_courses(season["id"])
-            results = {course["id"]: await database.get_course_results(course["id"]) for course in courses}
-            toggles = config.get_path("discord.message_toggles", {})
-            leaderboard = await database.get_season_leaderboard(season["id"]) if toggles.get("season_standings", True) else []
-            embed = MessageFormatter.create_season_dashboard(
-                season, courses, results, config.get_path("discord.show_final_times", True), leaderboard,
-                toggles.get("season_summary", True), toggles.get("season_standings", True),
-                toggles.get("course_grid", True), config.get_path("discord.show_scheduled_courses", True),
-                config.get_path("discord.top_players_count", 10), config.get_path("discord.courses_per_row", 2),
-            )
-            saved = await database.get_message(season["id"])
-            message = None
-            if saved and saved[0] == channel.id:
-                try:
-                    message = await channel.fetch_message(saved[1])
-                except (discord.NotFound, KeyError):
-                    message = None
-            if message is None:
-                message = await channel.send(embed=embed)
-                await database.store_message(season["id"], channel.id, message.id)
-            else:
-                await message.edit(embed=embed)
+            try:
+                channel = self._channel_for(season["id"])
+                if channel is None:
+                    continue
+                courses = await database.get_season_courses(season["id"])
+                results = {course["id"]: await database.get_course_results(course["id"]) for course in courses}
+                toggles = config.get_path("discord.message_toggles", {})
+                leaderboard = await database.get_season_leaderboard(season["id"]) if toggles.get("season_standings", True) else []
+                embed = MessageFormatter.create_season_dashboard(season, courses, results, config.get_path("discord.show_final_times", True), leaderboard, toggles.get("season_summary", True), toggles.get("season_standings", True), toggles.get("course_grid", True), config.get_path("discord.show_scheduled_courses", True), config.get_path("discord.top_players_count", 10), config.get_path("discord.courses_per_row", 2))
+                saved = await database.get_message(season["id"])
+                message = None
+                if saved and saved[0] == channel.id:
+                    try: message = await channel.fetch_message(saved[1])
+                    except (discord.NotFound, KeyError): pass
+                if message is None:
+                    message = await channel.send(embed=embed);await database.store_message(season["id"], channel.id, message.id)
+                else: await message.edit(embed=embed)
+            except Exception:
+                logger.exception("Secret Course dashboard delivery failed for %s", season["id"])
         await self._announce_final_courses(report)
         return report
 

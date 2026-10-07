@@ -37,11 +37,11 @@ async def secretcourse(interaction:discord.Interaction,action:str,subaction:str=
   try: season_id,channel_text=value.split(maxsplit=1);channel_id=int(channel_text)
   except (AttributeError,ValueError):await interaction.response.send_message('Use `config season-channel <season-id> <channel-id>`.',ephemeral=True);return
   config.set_path(f'discord.season_channel_ids.{season_id}',channel_id);await interaction.response.send_message(f'Channel for {season_id} set to {channel_id}.',ephemeral=True);return
- if action=='config' and subaction in {'scoring min','scoring best'}:
+ if action=='config' and subaction=='scoring':
   if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
-  try: count=int(value);assert count>=0
-  except (TypeError,ValueError,AssertionError):await interaction.response.send_message('Provide a non-negative number.',ephemeral=True);return
-  key='scoring.min_courses_required' if subaction=='scoring min' else 'scoring.best_courses_count'
+  try: mode,count_text=value.split(maxsplit=1);count=int(count_text);assert mode in {'min','best'} and count>=0
+  except (AttributeError,TypeError,ValueError,AssertionError):await interaction.response.send_message('Use `config scoring min|best <non-negative-count>`.',ephemeral=True);return
+  key='scoring.min_courses_required' if mode=='min' else 'scoring.best_courses_count'
   config.set_path(key,count);await interaction.response.send_message('Scoring configuration updated.',ephemeral=True);return
  if action=='toggle' and subaction in {'summary','standings','grid'}:
   if not is_admin(interaction):await interaction.response.send_message('You are not authorized to change configuration.',ephemeral=True);return
