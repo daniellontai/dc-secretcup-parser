@@ -336,8 +336,8 @@ class MessageFormatter:
                 if len(lines) == 1:
                     lines.append("No rankings yet")
             name, value = course["course_name"][:256], "\n".join(lines)[:1024]
-            if index >= max_course_fields or len(embed) + len(name) + len(value) > 5900:
-                if len(embed.fields) < 25 and len(embed) < 5850:
+            if index >= max_course_fields or len(embed) + len(name) + len(value) > 5650:
+                if len(embed.fields) < 25:
                     embed.add_field(name="More courses", value=f"{len(shown_courses) - index} courses omitted; use `/secretcourse courses {season['id']}`.", inline=False)
                 break
             embed.add_field(name=name, value=value, inline=courses_per_row > 1)

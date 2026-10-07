@@ -83,7 +83,7 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             for index in range(25)
         ]
         results = {
-            course["id"]: [{"rank": rank, "username": f"player{rank:04d}", "time": "123.456"} for rank in range(1, 11)]
+            course["id"]: [{"rank": rank, "username": f"playername{rank:03d}", "time": "36.000"} for rank in range(1, 11)]
             for course in courses
         }
 
