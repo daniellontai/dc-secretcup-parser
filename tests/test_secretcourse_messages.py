@@ -47,6 +47,12 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(pages, {0})
 
+    async def test_final_announcement_payloads_freeze_page_boundaries_before_delivery(self):
+        payloads = ['{"title":"page one"}', '{"title":"page two"}']
+        await self.database.store_final_announcement_page_payloads("final", payloads)
+
+        self.assertEqual(await self.database.get_final_announcement_page_payloads("final"), payloads)
+
     async def test_final_results_embed_lists_all_players_or_configured_limit(self):
         results = [
             {"rank": 1, "username": "thndr", "time": "35.407"},
@@ -62,6 +68,15 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("🥇 thndr — 35.407s (30 pts)", all_results[0].fields[0].value)
         self.assertIn("🥉 shakur — 37.012s (21 pts)", all_results[0].fields[0].value)
         self.assertNotIn("shakur", limited[0].fields[0].value)
+
+    async def test_final_results_embeds_bound_untrusted_display_text(self):
+        course = {"course_name": "course-" + "x" * 400, "finalized_at": 30}
+        results = [{"rank": 1, "username": "player-" + "y" * 1100, "time": "36.000"}]
+
+        embed = MessageFormatter.create_final_course_result_embeds(course, results, True, 0)[0]
+
+        self.assertLessEqual(len(embed.title), 256)
+        self.assertLessEqual(len(embed.fields[0].value), 1024)
 
     async def test_dashboard_uses_jka_names_and_lifecycle_specific_result_details(self):
         courses = await self.database.get_season_courses("cc-s3")

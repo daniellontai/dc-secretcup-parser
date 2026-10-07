@@ -351,11 +351,11 @@ class MessageFormatter:
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         for result in selected:
             marker = medals.get(result["rank"], f"{result['rank']}.")
-            line = f"{marker} {result['username']}"
+            line = f"{marker} {result['username'][:850]}"
             if show_final_times:
                 line += f" — {result['time']}s"
             line += f" ({MessageFormatter.calculate_points(result['rank'])} pts)"
-            lines.append(line)
+            lines.append(line[:950])
         pages, current = [], []
         for line in lines or ["No final results"]:
             if current and len("\n".join(current + [line])) > 950:
@@ -366,7 +366,7 @@ class MessageFormatter:
         embeds = []
         for index, page in enumerate(pages):
             suffix = f" ({index + 1}/{len(pages)})" if len(pages) > 1 else ""
-            embed = discord.Embed(title=f"🏁 {course['course_name']} - Final Results{suffix}", color=discord.Color.red())
+            embed = discord.Embed(title=f"🏁 {course['course_name'][:220]} - Final Results{suffix}", color=discord.Color.red())
             heading = f"Final Standings ({participant_count} participants)" if index == 0 else "Final Standings (continued)"
             embed.add_field(name=heading, value="\n".join(page), inline=False)
             if course.get("finalized_at"):

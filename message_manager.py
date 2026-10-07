@@ -1,6 +1,7 @@
 """Discord dashboard rendering and idempotent final-course delivery."""
 
 import asyncio
+import json
 import logging
 
 import discord
@@ -121,8 +122,14 @@ class MessageManager:
             try:
                 if channel is None:
                     raise RuntimeError("no Discord channel configured for final announcement")
-                results = await database.get_course_results(course_id)
-                embeds = MessageFormatter.create_final_course_result_embeds(course, results, config.get_path("discord.show_final_times", True), config.get_path("discord.final_announcement_players", 0))
+                payloads = await database.get_final_announcement_page_payloads(course_id)
+                if payloads:
+                    embeds = [discord.Embed.from_dict(json.loads(payload)) for payload in payloads]
+                else:
+                    results = await database.get_course_results(course_id)
+                    embeds = MessageFormatter.create_final_course_result_embeds(course, results, config.get_path("discord.show_final_times", True), config.get_path("discord.final_announcement_players", 0))
+                    payloads = [json.dumps(embed.to_dict()) for embed in embeds]
+                    await database.store_final_announcement_page_payloads(course_id, payloads)
                 delivered_pages = await database.get_final_announcement_pages(course_id)
                 for page_index, embed in enumerate(embeds):
                     if page_index not in delivered_pages:
