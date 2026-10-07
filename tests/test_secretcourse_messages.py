@@ -112,10 +112,52 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             await manager.update_all_messages()
             await manager.update_all_messages()
 
-            self.assertEqual(len(channel.sent), 2)
-            self.assertEqual(channel.sent[1]["embed"].title, "🏁 Final finalized")
+            self.assertEqual(len(channel.sent), 4)
+            self.assertEqual(
+                [item["embed"].title for item in channel.sent],
+                [
+                    "🏆 Climb Cup Season 3",
+                    "📊 Climb Cup Season 3 Standings",
+                    "🗺️ Climb Cup Season 3 - Course Progress",
+                    "🏁 Final finalized",
+                ],
+            )
+            self.assertIsNotNone(await self.database.get_message("cc-s3", "summary"))
+            self.assertIsNotNone(await self.database.get_message("cc-s3", "standings"))
+            self.assertIsNotNone(await self.database.get_message("cc-s3", "course_grid"))
         finally:
             config.set_path("discord.default_channel_id", previous_channel)
+
+    async def test_message_toggles_select_individual_jka_dashboard_messages(self):
+        class Message:
+            def __init__(self, message_id): self.id = message_id
+            async def edit(self, **kwargs): pass
+        class Channel:
+            def __init__(self): self.id, self.sent = 9, []
+            async def send(self, **kwargs): self.sent.append(kwargs); return Message(len(self.sent))
+            async def fetch_message(self, message_id): raise KeyError(message_id)
+        class Bot:
+            def __init__(self, channel): self.channel = channel
+            def get_channel(self, channel_id): return self.channel
+        class Synchronizer:
+            def __init__(self, database): self.database = database
+            async def sync_once(self): return SyncReport("rev-1", 50)
+
+        previous_channel = config.get_path("discord.default_channel_id")
+        previous_toggles = dict(config.get_path("discord.message_toggles"))
+        config.set_path("discord.default_channel_id", 9)
+        config.set_path("discord.message_toggles", {"season_summary": False, "season_standings": True, "course_grid": False})
+        try:
+            channel, manager = Channel(), MessageManager()
+            manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            dashboard_titles = [item["embed"].title for item in channel.sent if not item["embed"].title.startswith("🏁")]
+            self.assertEqual(dashboard_titles, ["📊 Climb Cup Season 3 Standings"])
+            self.assertIsNone(await self.database.get_message("cc-s3", "summary"))
+            self.assertIsNone(await self.database.get_message("cc-s3", "course_grid"))
+        finally:
+            config.set_path("discord.default_channel_id", previous_channel)
+            config.set_path("discord.message_toggles", previous_toggles)
 
     async def test_failed_announcement_is_retried_after_the_finalization_report_is_gone(self):
         class Message:

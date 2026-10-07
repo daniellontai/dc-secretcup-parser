@@ -82,7 +82,7 @@ class DatabaseManager:
 
     async def get_season_courses(self, season_id: str) -> list[dict]:
         with self._db() as database:
-            return [dict(row) for row in database.execute("SELECT id,season_id,course_name,starts_at,expires_at,lifecycle,finalized_at FROM sc_imported_courses WHERE season_id=? ORDER BY starts_at,id", (season_id,))]
+            return [dict(row) for row in database.execute("SELECT id,season_id,course_name,starts_at,expires_at,lifecycle,finalized_at FROM sc_imported_courses WHERE season_id=? ORDER BY expires_at,id", (season_id,))]
 
     async def get_course(self, course_id: str) -> dict | None:
         with self._db() as database:
@@ -121,14 +121,14 @@ class DatabaseManager:
             row["position"] = position
         return leaderboard
 
-    async def get_message(self, season_id: str):
+    async def get_message(self, season_id: str, message_type: str = "dashboard"):
         with self._db() as database:
-            return database.execute("SELECT channel_id,message_id FROM sc_season_messages WHERE season_id=? AND message_type='dashboard'", (season_id,)).fetchone()
+            return database.execute("SELECT channel_id,message_id FROM sc_season_messages WHERE season_id=? AND message_type=?", (season_id, message_type)).fetchone()
 
-    async def store_message(self, season_id: str, channel_id: int, message_id: int) -> None:
+    async def store_message(self, season_id: str, message_type: str, channel_id: int, message_id: int) -> None:
         with self._db() as database:
             database.execute("""INSERT INTO sc_season_messages VALUES(?,?,?,?)
-                ON CONFLICT(season_id,message_type) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id""", (season_id, "dashboard", channel_id, message_id))
+                ON CONFLICT(season_id,message_type) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id""", (season_id, message_type, channel_id, message_id))
 
     async def claim_final_announcement(self, course_id: str) -> bool:
         with self._db() as database:

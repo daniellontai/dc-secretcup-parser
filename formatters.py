@@ -287,6 +287,56 @@ class MessageFormatter:
         return embed
 
     @staticmethod
+    def create_jka_season_summary(season: Dict, leaderboard: List[Dict], top_players: int) -> discord.Embed:
+        embed = discord.Embed(title=f"🏆 {season['name']}", color=discord.Color.gold())
+        if not leaderboard:
+            embed.add_field(name="Top players", value="No results yet", inline=False)
+        else:
+            medals = ("🥇", "🥈", "🥉")
+            lines = []
+            for row in leaderboard[:top_players]:
+                marker = medals[row["position"] - 1] if row["position"] <= 3 else f"{row['position']}."
+                lines.append(f"{marker} {row['username']} — {row['total_points']} pts ({row['projected_points']} projected)")
+            embed.add_field(name="Top players", value="\n".join(lines)[:1024], inline=False)
+        return embed
+
+    @staticmethod
+    def create_jka_season_standings(season: Dict, leaderboard: List[Dict], top_players: int) -> discord.Embed:
+        embed = discord.Embed(title=f"📊 {season['name']} Standings", color=discord.Color.blue())
+        if not leaderboard:
+            embed.add_field(name="Detailed standings", value="No results yet", inline=False)
+            return embed
+        lines = ["Pos | Player     | Score | Projected | Courses", "----|------------|-------|-----------|--------"]
+        for row in leaderboard[:top_players]:
+            lines.append(f"{row['position']:>3} | {row['username'][:10]:<10} | {row['total_points']:>5} | {row['projected_points']:>9} | {row['courses_completed']:>6}")
+        embed.add_field(name="Detailed standings", value=("```\n" + "\n".join(lines) + "\n```")[:1024], inline=False)
+        return embed
+
+    @staticmethod
+    def create_jka_course_grid(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool, show_scheduled: bool, top_players: int, courses_per_row: int) -> discord.Embed:
+        embed = discord.Embed(title=f"🗺️ {season['name']} - Course Progress", color=discord.Color.green())
+        shown_courses = [course for course in courses if show_scheduled or course["lifecycle"] != "scheduled"]
+        if not shown_courses:
+            embed.description = "No cup courses"
+            return embed
+        for course in shown_courses[:25]:
+            lifecycle = course["lifecycle"]
+            if lifecycle == "scheduled":
+                lines = [f"Starts: <t:{course['starts_at']}:F>", f"Ends: <t:{course['expires_at']}:F>"]
+            else:
+                status = "Finalized" if lifecycle == "expired" else f"Expires: <t:{course['expires_at']}:R>"
+                lines = [status]
+                for result in results.get(course["id"], [])[:top_players]:
+                    line = f"{result['rank']}. {result['username']}"
+                    if lifecycle == "expired" and show_final_times:
+                        line += f" — {result['time']}"
+                    lines.append(line)
+                if len(lines) == 1:
+                    lines.append("No rankings yet")
+            embed.add_field(name=course["course_name"][:256], value="\n".join(lines)[:1024], inline=courses_per_row > 1)
+        return embed
+
+    @staticmethod
     def create_season_dashboard(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool, leaderboard: List[Dict] | None = None, show_summary: bool = True, show_standings: bool = True, show_courses: bool = True, show_scheduled: bool = True, top_players: int = 10, courses_per_row: int = 2) -> discord.Embed:
         """Render one imported JKA season without relying on legacy bot seasons."""
         embed = discord.Embed(title=f"🏆 {season['name']}", color=discord.Color.green())

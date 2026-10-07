@@ -66,20 +66,35 @@ class MessageManager:
                 courses = await database.get_season_courses(season["id"])
                 results = {course["id"]: await database.get_course_results(course["id"]) for course in courses}
                 toggles = config.get_path("discord.message_toggles", {})
-                leaderboard = await database.get_season_leaderboard(season["id"]) if toggles.get("season_standings", True) else []
-                embed = MessageFormatter.create_season_dashboard(season, courses, results, config.get_path("discord.show_final_times", True), leaderboard, toggles.get("season_summary", True), toggles.get("season_standings", True), toggles.get("course_grid", True), config.get_path("discord.show_scheduled_courses", True), config.get_path("discord.top_players_count", 10), config.get_path("discord.courses_per_row", 2))
-                saved = await database.get_message(season["id"])
-                message = None
-                if saved and saved[0] == channel.id:
-                    try: message = await channel.fetch_message(saved[1])
-                    except (discord.NotFound, KeyError): pass
-                if message is None:
-                    message = await channel.send(embed=embed);await database.store_message(season["id"], channel.id, message.id)
-                else: await message.edit(embed=embed)
+                top_players = config.get_path("discord.top_players_count", 10)
+                leaderboard = await database.get_season_leaderboard(season["id"])
+                messages = []
+                if toggles.get("season_summary", True):
+                    messages.append(("summary", MessageFormatter.create_jka_season_summary(season, leaderboard, top_players)))
+                if toggles.get("season_standings", True):
+                    messages.append(("standings", MessageFormatter.create_jka_season_standings(season, leaderboard, top_players)))
+                if toggles.get("course_grid", True):
+                    messages.append(("course_grid", MessageFormatter.create_jka_course_grid(season, courses, results, config.get_path("discord.show_final_times", True), config.get_path("discord.show_scheduled_courses", True), top_players, config.get_path("discord.courses_per_row", 2))))
+                for message_type, embed in messages:
+                    await self._upsert_message(database, season["id"], message_type, channel, embed)
             except Exception:
                 logger.exception("Secret Course dashboard delivery failed for %s", season["id"])
         await self._announce_final_courses(report)
         return report
+
+    async def _upsert_message(self, database, season_id: str, message_type: str, channel, embed) -> None:
+        saved = await database.get_message(season_id, message_type)
+        message = None
+        if saved and saved[0] == channel.id:
+            try:
+                message = await channel.fetch_message(saved[1])
+            except (discord.NotFound, KeyError):
+                pass
+        if message is None:
+            message = await channel.send(embed=embed)
+            await database.store_message(season_id, message_type, channel.id, message.id)
+        else:
+            await message.edit(embed=embed)
 
     async def _announce_final_courses(self, report) -> None:
         database = self.synchronizer.database

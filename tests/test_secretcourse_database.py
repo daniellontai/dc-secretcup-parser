@@ -32,6 +32,18 @@ class SecretCourseDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([course["id"] for course in courses], ["sumot", "sumot-rerun"])
 
+    async def test_season_courses_are_ordered_by_nearest_expiry(self):
+        later = cup("later")
+        sooner = ExportCourse("sooner", "Sooner", "cup", "cc-s3", 99, 15, "active", 10, None, "private", "/soon.json")
+        await self.database.apply_status(
+            StatusExport("rev-1", (ExportSeason("cc-s3", "Climb Cup Season 3", 1, 100),), (later, sooner)),
+            seen_at=50,
+        )
+
+        courses = await self.database.get_season_courses("cc-s3")
+
+        self.assertEqual([course["id"] for course in courses], ["sooner", "later"])
+
     async def test_finalization_is_idempotent_and_survives_reopening_database(self):
         await self.database.apply_status(self.status, seen_at=50)
 
