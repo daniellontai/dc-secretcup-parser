@@ -121,11 +121,13 @@ class MessageManager:
             try:
                 if channel is None:
                     raise RuntimeError("no Discord channel configured for final announcement")
-                await channel.send(embed=discord.Embed(
-                    title=f"🏁 {course['course_name']} finalized",
-                    description=f"{course['course_name']} has been finalized by JKA.",
-                    color=discord.Color.gold(),
-                ))
+                results = await database.get_course_results(course_id)
+                embeds = MessageFormatter.create_final_course_result_embeds(course, results, config.get_path("discord.show_final_times", True), config.get_path("discord.final_announcement_players", 0))
+                delivered_pages = await database.get_final_announcement_pages(course_id)
+                for page_index, embed in enumerate(embeds):
+                    if page_index not in delivered_pages:
+                        message = await channel.send(embed=embed)
+                        await database.store_final_announcement_page(course_id, page_index, channel.id, message.id)
             except Exception:
                 await database.release_final_announcement(course_id)
             else:

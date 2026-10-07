@@ -40,6 +40,29 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
         reopened = DatabaseManager(self.database.bot_db_path)
         self.assertFalse(await reopened.claim_final_announcement("final"))
 
+    async def test_final_announcement_pages_are_durable_across_retries(self):
+        await self.database.store_final_announcement_page("final", 0, 9, 99)
+
+        pages = await self.database.get_final_announcement_pages("final")
+
+        self.assertEqual(pages, {0})
+
+    async def test_final_results_embed_lists_all_players_or_configured_limit(self):
+        results = [
+            {"rank": 1, "username": "thndr", "time": "35.407"},
+            {"rank": 2, "username": "zielu", "time": "36.245"},
+            {"rank": 3, "username": "shakur", "time": "37.012"},
+        ]
+        course = {"course_name": "Capella-Mountain", "finalized_at": 30}
+
+        all_results = MessageFormatter.create_final_course_result_embeds(course, results, True, 0)
+        limited = MessageFormatter.create_final_course_result_embeds(course, results, True, 2)
+
+        self.assertEqual(all_results[0].title, "🏁 Capella-Mountain - Final Results")
+        self.assertIn("🥇 thndr — 35.407s (30 pts)", all_results[0].fields[0].value)
+        self.assertIn("🥉 shakur — 37.012s (21 pts)", all_results[0].fields[0].value)
+        self.assertNotIn("shakur", limited[0].fields[0].value)
+
     async def test_dashboard_uses_jka_names_and_lifecycle_specific_result_details(self):
         courses = await self.database.get_season_courses("cc-s3")
         results = {item["id"]: await self.database.get_course_results(item["id"]) for item in courses}
@@ -134,7 +157,7 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
                     "🏆 Climb Cup Season 3",
                     "📊 Climb Cup Season 3 Standings",
                     "🗺️ Climb Cup Season 3 - Course Progress",
-                    "🏁 Final finalized",
+                    "🏁 Final - Final Results",
                 ],
             )
             self.assertIsNotNone(await self.database.get_message("cc-s3", "summary"))
@@ -239,6 +262,6 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
             await manager.update_all_messages()
             await manager.update_all_messages()
-            self.assertEqual([item['embed'].title for item in channel.sent].count('🏁 Final finalized'), 1)
+            self.assertEqual([item['embed'].title for item in channel.sent].count('🏁 Final - Final Results'), 1)
         finally:
             config.set_path('discord.default_channel_id', previous_channel)

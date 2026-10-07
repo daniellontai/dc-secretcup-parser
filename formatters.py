@@ -344,6 +344,37 @@ class MessageFormatter:
         return embed
 
     @staticmethod
+    def create_final_course_result_embeds(course: Dict, results: List[Dict], show_final_times: bool, max_players: int) -> List[discord.Embed]:
+        selected = results if max_players == 0 else results[:max_players]
+        participant_count = len(results)
+        lines = []
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for result in selected:
+            marker = medals.get(result["rank"], f"{result['rank']}.")
+            line = f"{marker} {result['username']}"
+            if show_final_times:
+                line += f" — {result['time']}s"
+            line += f" ({MessageFormatter.calculate_points(result['rank'])} pts)"
+            lines.append(line)
+        pages, current = [], []
+        for line in lines or ["No final results"]:
+            if current and len("\n".join(current + [line])) > 950:
+                pages.append(current); current = []
+            current.append(line)
+        if current:
+            pages.append(current)
+        embeds = []
+        for index, page in enumerate(pages):
+            suffix = f" ({index + 1}/{len(pages)})" if len(pages) > 1 else ""
+            embed = discord.Embed(title=f"🏁 {course['course_name']} - Final Results{suffix}", color=discord.Color.red())
+            heading = f"Final Standings ({participant_count} participants)" if index == 0 else "Final Standings (continued)"
+            embed.add_field(name=heading, value="\n".join(page), inline=False)
+            if course.get("finalized_at"):
+                embed.set_footer(text=f"Course finalized at {datetime.fromtimestamp(course['finalized_at']).strftime('%Y-%m-%d %H:%M:%S')}")
+            embeds.append(embed)
+        return embeds
+
+    @staticmethod
     def create_season_dashboard(season: Dict, courses: List[Dict], results: Dict[str, List[Dict]], show_final_times: bool, leaderboard: List[Dict] | None = None, show_summary: bool = True, show_standings: bool = True, show_courses: bool = True, show_scheduled: bool = True, top_players: int = 10, courses_per_row: int = 2) -> discord.Embed:
         """Render one imported JKA season without relying on legacy bot seasons."""
         embed = discord.Embed(title=f"🏆 {season['name']}", color=discord.Color.green())

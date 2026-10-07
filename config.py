@@ -34,6 +34,7 @@ class Config:
                 "courses_per_row": 2,
                 "show_scheduled_courses": True,
                 "show_final_times": True,
+                "final_announcement_players": 0,
                 "message_toggles": {
                     "season_summary": True,
                     "season_standings": True,

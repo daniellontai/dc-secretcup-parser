@@ -26,6 +26,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS sc_course_results (course_id TEXT NOT NULL, username TEXT NOT NULL, style INTEGER NOT NULL, rank INTEGER NOT NULL, time TEXT NOT NULL, duration_ms INTEGER NOT NULL, topspeed INTEGER NOT NULL, average INTEGER NOT NULL, end_time INTEGER NOT NULL, is_final INTEGER NOT NULL, PRIMARY KEY(course_id, username, style));
                 CREATE TABLE IF NOT EXISTS sc_final_points (course_id TEXT NOT NULL, username TEXT NOT NULL, points INTEGER NOT NULL, PRIMARY KEY(course_id, username));
                 CREATE TABLE IF NOT EXISTS sc_season_messages (season_id TEXT NOT NULL, message_type TEXT NOT NULL, channel_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY(season_id, message_type));
+                CREATE TABLE IF NOT EXISTS sc_final_announcement_pages (course_id TEXT NOT NULL, page_index INTEGER NOT NULL, channel_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY(course_id, page_index));
             """)
             columns = {row["name"] for row in database.execute("PRAGMA table_info(sc_imported_courses)")}
             for name in ("announced_at", "announcement_claimed_at"):
@@ -154,6 +155,14 @@ class DatabaseManager:
     async def get_unannounced_final_courses(self) -> list[dict]:
         with self._db() as database:
             return [dict(row) for row in database.execute("SELECT * FROM sc_imported_courses WHERE final_imported_at IS NOT NULL AND announced_at IS NULL")]
+
+    async def get_final_announcement_pages(self, course_id: str) -> set[int]:
+        with self._db() as database:
+            return {row["page_index"] for row in database.execute("SELECT page_index FROM sc_final_announcement_pages WHERE course_id=?", (course_id,))}
+
+    async def store_final_announcement_page(self, course_id: str, page_index: int, channel_id: int, message_id: int) -> None:
+        with self._db() as database:
+            database.execute("INSERT OR REPLACE INTO sc_final_announcement_pages VALUES(?,?,?,?)", (course_id, page_index, channel_id, message_id))
 
     @staticmethod
     def calculate_points(position: int) -> int:
