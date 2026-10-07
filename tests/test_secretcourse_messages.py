@@ -77,6 +77,21 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.fields[0].name, "Active now")
         self.assertEqual(embed.fields[-1].name, "More courses")
 
+    async def test_jka_course_grid_stays_within_discord_embed_limit(self):
+        courses = [
+            {"id": f"course-{index}", "course_name": f"Course {index}", "starts_at": 1, "expires_at": index + 10, "lifecycle": "expired"}
+            for index in range(25)
+        ]
+        results = {
+            course["id"]: [{"rank": rank, "username": f"player{rank:04d}", "time": "123.456"} for rank in range(1, 11)]
+            for course in courses
+        }
+
+        embed = MessageFormatter.create_jka_course_grid({"id": "cc-s3", "name": "Cup"}, courses, results, True, True, 10, 2)
+
+        self.assertLessEqual(len(embed), 6000)
+        self.assertEqual(embed.fields[-1].name, "More courses")
+
     async def test_final_announcement_is_sent_once_across_repeated_reports(self):
         class Message:
             def __init__(self, message_id): self.id = message_id
@@ -155,6 +170,42 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(dashboard_titles, ["📊 Climb Cup Season 3 Standings"])
             self.assertIsNone(await self.database.get_message("cc-s3", "summary"))
             self.assertIsNone(await self.database.get_message("cc-s3", "course_grid"))
+        finally:
+            config.set_path("discord.default_channel_id", previous_channel)
+            config.set_path("discord.message_toggles", previous_toggles)
+
+    async def test_turning_a_published_message_toggle_off_removes_its_stale_message(self):
+        class Message:
+            def __init__(self, message_id): self.id, self.deleted = message_id, False
+            async def edit(self, **kwargs): pass
+            async def delete(self): self.deleted = True
+        class Channel:
+            def __init__(self): self.id, self.sent, self.messages = 9, [], {}
+            async def send(self, **kwargs):
+                message = Message(len(self.messages) + 1); self.messages[message.id] = message; self.sent.append(kwargs); return message
+            async def fetch_message(self, message_id): return self.messages[message_id]
+        class Bot:
+            def __init__(self, channel): self.channel = channel
+            def get_channel(self, channel_id): return self.channel
+        class Synchronizer:
+            def __init__(self, database): self.database = database
+            async def sync_once(self): return SyncReport("rev-1", 50)
+
+        previous_channel = config.get_path("discord.default_channel_id")
+        previous_toggles = dict(config.get_path("discord.message_toggles"))
+        config.set_path("discord.default_channel_id", 9)
+        config.set_path("discord.message_toggles", {"season_summary": True, "season_standings": True, "course_grid": False})
+        try:
+            channel, manager = Channel(), MessageManager()
+            manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            standings = await self.database.get_message("cc-s3", "standings")
+            config.set_path("discord.message_toggles", {"season_summary": True, "season_standings": False, "course_grid": False})
+
+            await manager.update_all_messages()
+
+            self.assertTrue(channel.messages[standings[1]].deleted)
+            self.assertIsNone(await self.database.get_message("cc-s3", "standings"))
         finally:
             config.set_path("discord.default_channel_id", previous_channel)
             config.set_path("discord.message_toggles", previous_toggles)

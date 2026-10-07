@@ -130,6 +130,10 @@ class DatabaseManager:
             database.execute("""INSERT INTO sc_season_messages VALUES(?,?,?,?)
                 ON CONFLICT(season_id,message_type) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id""", (season_id, message_type, channel_id, message_id))
 
+    async def delete_message(self, season_id: str, message_type: str) -> None:
+        with self._db() as database:
+            database.execute("DELETE FROM sc_season_messages WHERE season_id=? AND message_type=?", (season_id, message_type))
+
     async def claim_final_announcement(self, course_id: str) -> bool:
         with self._db() as database:
             result = database.execute("UPDATE sc_imported_courses SET announcement_claimed_at=? WHERE id=? AND final_imported_at IS NOT NULL AND announced_at IS NULL AND announcement_claimed_at IS NULL", (int(time.time()), course_id))

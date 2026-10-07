@@ -319,7 +319,9 @@ class MessageFormatter:
         if not shown_courses:
             embed.description = "No cup courses"
             return embed
-        for course in shown_courses[:25]:
+        reserve_overflow = len(shown_courses) > 25
+        max_course_fields = 24 if reserve_overflow else 25
+        for index, course in enumerate(shown_courses):
             lifecycle = course["lifecycle"]
             if lifecycle == "scheduled":
                 lines = [f"Starts: <t:{course['starts_at']}:F>", f"Ends: <t:{course['expires_at']}:F>"]
@@ -333,7 +335,12 @@ class MessageFormatter:
                     lines.append(line)
                 if len(lines) == 1:
                     lines.append("No rankings yet")
-            embed.add_field(name=course["course_name"][:256], value="\n".join(lines)[:1024], inline=courses_per_row > 1)
+            name, value = course["course_name"][:256], "\n".join(lines)[:1024]
+            if index >= max_course_fields or len(embed) + len(name) + len(value) > 5900:
+                if len(embed.fields) < 25 and len(embed) < 5850:
+                    embed.add_field(name="More courses", value=f"{len(shown_courses) - index} courses omitted; use `/secretcourse courses {season['id']}`.", inline=False)
+                break
+            embed.add_field(name=name, value=value, inline=courses_per_row > 1)
         return embed
 
     @staticmethod

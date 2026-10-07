@@ -75,6 +75,9 @@ class MessageManager:
                     messages.append(("standings", MessageFormatter.create_jka_season_standings(season, leaderboard, top_players)))
                 if toggles.get("course_grid", True):
                     messages.append(("course_grid", MessageFormatter.create_jka_course_grid(season, courses, results, config.get_path("discord.show_final_times", True), config.get_path("discord.show_scheduled_courses", True), top_players, config.get_path("discord.courses_per_row", 2))))
+                enabled_types = {message_type for message_type, _ in messages}
+                for message_type in {"summary", "standings", "course_grid"} - enabled_types:
+                    await self._remove_message(database, season["id"], message_type, channel)
                 for message_type, embed in messages:
                     await self._upsert_message(database, season["id"], message_type, channel, embed)
             except Exception:
@@ -95,6 +98,17 @@ class MessageManager:
             await database.store_message(season_id, message_type, channel.id, message.id)
         else:
             await message.edit(embed=embed)
+
+    async def _remove_message(self, database, season_id: str, message_type: str, channel) -> None:
+        saved = await database.get_message(season_id, message_type)
+        if saved is None:
+            return
+        if saved[0] == channel.id:
+            try:
+                await (await channel.fetch_message(saved[1])).delete()
+            except (discord.NotFound, KeyError):
+                pass
+        await database.delete_message(season_id, message_type)
 
     async def _announce_final_courses(self, report) -> None:
         database = self.synchronizer.database
