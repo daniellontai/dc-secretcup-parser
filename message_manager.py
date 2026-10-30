@@ -84,6 +84,8 @@ class MessageManager:
             except Exception:
                 logger.exception("Secret Course dashboard delivery failed for %s", season["id"])
         await self._announce_final_courses(report)
+        if report.successful:
+            await self._announce_finished_seasons()
         return report
 
     async def _upsert_message(self, database, season_id: str, message_type: str, channel, embed) -> None:
@@ -139,6 +141,26 @@ class MessageManager:
                 await database.release_final_announcement(course_id)
             else:
                 await database.mark_final_announced(course_id)
+
+    async def _announce_finished_seasons(self) -> None:
+        database = self.synchronizer.database
+        await database.release_pending_season_finish_announcement_claims()
+        for season in await database.get_unannounced_completed_seasons():
+            season_id = season["id"]
+            if not await database.claim_season_finish_announcement(season_id):
+                continue
+            try:
+                channel = self._channel_for(season_id)
+                if channel is None:
+                    raise RuntimeError("no Discord channel configured for season finish announcement")
+                leaderboard = await database.get_season_leaderboard(season_id, include_projections=False)
+                message = await channel.send(
+                    embed=MessageFormatter.create_final_season_result_embed(season, leaderboard)
+                )
+            except Exception:
+                await database.release_season_finish_announcement(season_id)
+            else:
+                await database.mark_season_finish_announced(season_id, channel.id, message.id)
 
     async def force_update(self):
         await self.update_all_messages()

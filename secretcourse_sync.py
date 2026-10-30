@@ -9,7 +9,7 @@ class SecretCourseSynchronizer:
   try: status=await self.source.load_status()
   except SecretCourseSourceError as e:
    previous=self.last_successful_report
-   self.last_report=SyncReport(previous.revision if previous else None,int(time.time()),previous.imported_courses if previous else 0,warnings=(str(e),));return self.last_report
+   self.last_report=SyncReport(previous.revision if previous else None,int(time.time()),previous.imported_courses if previous else 0,warnings=(str(e),),successful=False);return self.last_report
   cups=[c for c in status.courses if c.type=='cup']; await self.database.apply_status(status,int(time.time()))
   warnings=[]; finalized=[]
   for c in cups:

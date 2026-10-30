@@ -14,6 +14,7 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
     raise SecretCourseSourceError('missing')
   report=await SecretCourseSynchronizer(Source(),None).sync_once()
   self.assertEqual(report.warnings,('missing',))
+  self.assertFalse(report.successful)
 
  async def test_expired_course_without_jka_finalization_is_not_loaded_or_scored(self):
   class Source:

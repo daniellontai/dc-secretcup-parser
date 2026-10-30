@@ -311,3 +311,133 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([item['embed'].title for item in channel.sent].count('🏁 Final - Final Results'), 1)
         finally:
             config.set_path('discord.default_channel_id', previous_channel)
+
+    async def test_incomplete_or_failed_sync_does_not_announce_season_completion(self):
+        class Message:
+            def __init__(self, message_id): self.id = message_id
+            async def edit(self, **kwargs): pass
+        class Channel:
+            def __init__(self): self.id, self.sent, self.messages = 9, [], {}
+            async def send(self, **kwargs):
+                self.sent.append(kwargs)
+                message = Message(len(self.sent)); self.messages[message.id] = message
+                return message
+            async def fetch_message(self, message_id): return self.messages[message_id]
+        class Bot:
+            def __init__(self, channel): self.channel = channel
+            def get_channel(self, channel_id): return self.channel if channel_id == 9 else None
+        class Synchronizer:
+            def __init__(self, database): self.database = database
+            async def sync_once(self): return SyncReport(None, 50, successful=False)
+
+        previous_channel = config.get_path("discord.default_channel_id")
+        config.set_path("discord.default_channel_id", 9)
+        try:
+            channel = Channel()
+            manager = MessageManager()
+            manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            self.assertEqual(
+                [item["embed"].title for item in channel.sent if item["embed"].title.endswith("Season Complete")],
+                [],
+            )
+        finally:
+            config.set_path("discord.default_channel_id", previous_channel)
+
+    async def test_finished_seasons_route_to_override_or_default_once(self):
+        seasons = (
+            ExportSeason("cc-s4", "Climb Cup Season 4", 1, 100),
+            ExportSeason("cc-s5", "Climb Cup Season 5", 1, 100),
+        )
+        status = StatusExport(
+            "rev-2",
+            seasons,
+            (course("cc-s4-final", "cc-s4", "active"), course("cc-s5-final", "cc-s5", "active")),
+        )
+        await self.database.apply_status(status, 60)
+        await self.database.finalize_course("cc-s4-final", 70, [LeaderboardEntry("four", 1, "35.000", 35000, 1, 1, 1)])
+        await self.database.finalize_course("cc-s5-final", 70, [LeaderboardEntry("five", 1, "36.000", 36000, 1, 1, 1)])
+
+        class Message:
+            def __init__(self, message_id): self.id = message_id
+            async def edit(self, **kwargs): pass
+        class Channel:
+            def __init__(self, channel_id): self.id, self.sent, self.messages = channel_id, [], {}
+            async def send(self, **kwargs):
+                self.sent.append(kwargs)
+                message = Message(len(self.sent)); self.messages[message.id] = message
+                return message
+            async def fetch_message(self, message_id): return self.messages[message_id]
+        class Bot:
+            def __init__(self, channels): self.channels = channels
+            def get_channel(self, channel_id): return self.channels.get(channel_id)
+        class Synchronizer:
+            def __init__(self, database): self.database = database
+            async def sync_once(self): return SyncReport("rev-2", 70)
+
+        previous_default = config.get_path("discord.default_channel_id")
+        previous_overrides = dict(config.get_path("discord.season_channel_ids"))
+        config.set_path("discord.default_channel_id", 9)
+        config.set_path("discord.season_channel_ids", {"cc-s4": 10})
+        try:
+            default, override = Channel(9), Channel(10)
+            manager = MessageManager()
+            manager.set_bot(Bot({9: default, 10: override}))
+            manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            await manager.update_all_messages()
+            self.assertEqual(
+                [item["embed"].title for item in override.sent if item["embed"].title.endswith("Season Complete")],
+                ["🏁 Climb Cup Season 4 - Season Complete"],
+            )
+            self.assertEqual(
+                [item["embed"].title for item in default.sent if item["embed"].title.endswith("Season Complete")],
+                ["🏁 Climb Cup Season 5 - Season Complete"],
+            )
+        finally:
+            config.set_path("discord.default_channel_id", previous_default)
+            config.set_path("discord.season_channel_ids", previous_overrides)
+
+    async def test_failed_season_finish_send_is_retried_on_next_successful_sync(self):
+        status = StatusExport(
+            "rev-2",
+            (ExportSeason("cc-s4", "Climb Cup Season 4", 1, 100),),
+            (course("cc-s4-final", "cc-s4", "active"),),
+        )
+        await self.database.apply_status(status, 60)
+        await self.database.finalize_course("cc-s4-final", 70, [LeaderboardEntry("four", 1, "35.000", 35000, 1, 1, 1)])
+
+        class Message:
+            def __init__(self, message_id): self.id = message_id
+            async def edit(self, **kwargs): pass
+        class Channel:
+            def __init__(self): self.id, self.sent, self.messages, self.fail_finish = 9, [], {}, True
+            async def send(self, **kwargs):
+                if kwargs["embed"].title.endswith("Season Complete") and self.fail_finish:
+                    self.fail_finish = False
+                    raise RuntimeError("temporary Discord failure")
+                self.sent.append(kwargs)
+                message = Message(len(self.sent)); self.messages[message.id] = message
+                return message
+            async def fetch_message(self, message_id): return self.messages[message_id]
+        class Bot:
+            def __init__(self, channel): self.channel = channel
+            def get_channel(self, channel_id): return self.channel if channel_id == 9 else None
+        class Synchronizer:
+            def __init__(self, database): self.database = database
+            async def sync_once(self): return SyncReport("rev-2", 70)
+
+        previous_channel = config.get_path("discord.default_channel_id")
+        config.set_path("discord.default_channel_id", 9)
+        try:
+            channel = Channel()
+            manager = MessageManager()
+            manager.set_bot(Bot(channel)); manager.set_synchronizer(Synchronizer(self.database))
+            await manager.update_all_messages()
+            await manager.update_all_messages()
+            self.assertEqual(
+                [item["embed"].title for item in channel.sent if item["embed"].title.endswith("Season Complete")],
+                ["🏁 Climb Cup Season 4 - Season Complete"],
+            )
+        finally:
+            config.set_path("discord.default_channel_id", previous_channel)

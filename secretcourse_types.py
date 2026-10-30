@@ -51,3 +51,4 @@ class SyncReport:
     imported_courses: int = 0
     finalized_course_ids: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    successful: bool = True
