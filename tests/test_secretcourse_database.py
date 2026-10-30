@@ -66,6 +66,70 @@ class SecretCourseDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(courses["sumot"]["lifecycle"], "expired")
         self.assertEqual([(row["username"], row["total_points"]) for row in leaderboard], [("thndr", 30)])
 
+    async def test_completed_season_requires_final_import_for_every_non_retired_course(self):
+        await self.database.apply_status(self.status, seen_at=50)
+        await self.database.finalize_course("sumot", 60, [entry("thndr")])
+
+        self.assertEqual(await self.database.get_unannounced_completed_seasons(), [])
+
+        await self.database.finalize_course("sumot-rerun", 61, [entry("shakur")])
+
+        self.assertEqual(
+            [season["id"] for season in await self.database.get_unannounced_completed_seasons()],
+            ["cc-s3"],
+        )
+
+    async def test_season_without_cup_courses_is_not_completed(self):
+        await self.database.apply_status(
+            StatusExport("rev-1", self.status.seasons, ()),
+            seen_at=50,
+        )
+
+        self.assertEqual(await self.database.get_unannounced_completed_seasons(), [])
+
+    async def test_missing_scheduled_course_is_cancelled_and_no_longer_blocks_completion(self):
+        status = StatusExport(
+            "rev-1",
+            self.status.seasons,
+            (cup("scheduled", lifecycle="scheduled"), cup("final")),
+        )
+        await self.database.apply_status(status, seen_at=50)
+        await self.database.finalize_course("final", 60, [entry("thndr")])
+
+        await self.database.mark_missing_courses({"final"}, seen_at=70)
+
+        courses = {course["id"]: course for course in await self.database.get_season_courses("cc-s3")}
+        self.assertEqual(courses["scheduled"]["lifecycle"], "cancelled")
+        self.assertEqual(
+            [season["id"] for season in await self.database.get_unannounced_completed_seasons()],
+            ["cc-s3"],
+        )
+
+    async def test_season_finish_claim_and_recorded_delivery_survive_reopen(self):
+        await self.database.apply_status(self.status, seen_at=50)
+        await self.database.finalize_course("sumot", 60, [entry("thndr")])
+        await self.database.finalize_course("sumot-rerun", 61, [entry("shakur")])
+
+        self.assertTrue(await self.database.claim_season_finish_announcement("cc-s3"))
+        await self.database.mark_season_finish_announced("cc-s3", 9, 99)
+
+        reopened = DatabaseManager(self.database.bot_db_path)
+        self.assertFalse(await reopened.claim_season_finish_announcement("cc-s3"))
+
+    async def test_recorded_season_finish_is_not_reopened_when_jka_later_adds_a_course(self):
+        await self.database.apply_status(self.status, seen_at=50)
+        await self.database.finalize_course("sumot", 60, [entry("thndr")])
+        await self.database.finalize_course("sumot-rerun", 61, [entry("shakur")])
+        self.assertTrue(await self.database.claim_season_finish_announcement("cc-s3"))
+        await self.database.mark_season_finish_announced("cc-s3", 9, 99)
+
+        await self.database.apply_status(
+            StatusExport("rev-2", self.status.seasons, (*self.status.courses, cup("later", lifecycle="scheduled"))),
+            seen_at=70,
+        )
+
+        self.assertEqual(await self.database.get_unannounced_completed_seasons(), [])
+
     async def test_leaderboard_keeps_final_points_separate_from_active_projections(self):
         await self.database.apply_status(self.status, seen_at=50)
         await self.database.finalize_course("sumot", 60, [entry("thndr")])

@@ -28,6 +28,7 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS sc_season_messages (season_id TEXT NOT NULL, message_type TEXT NOT NULL, channel_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY(season_id, message_type));
                 CREATE TABLE IF NOT EXISTS sc_final_announcement_pages (course_id TEXT NOT NULL, page_index INTEGER NOT NULL, channel_id INTEGER NOT NULL, message_id INTEGER NOT NULL, PRIMARY KEY(course_id, page_index));
                 CREATE TABLE IF NOT EXISTS sc_final_announcement_page_payloads (course_id TEXT NOT NULL, page_index INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(course_id, page_index));
+                CREATE TABLE IF NOT EXISTS sc_season_finish_announcements (season_id TEXT PRIMARY KEY, claimed_at INTEGER, announced_at INTEGER, channel_id INTEGER, message_id INTEGER);
             """)
             columns = {row["name"] for row in database.execute("PRAGMA table_info(sc_imported_courses)")}
             for name in ("announced_at", "announcement_claimed_at"):
@@ -74,7 +75,7 @@ class DatabaseManager:
 
     async def mark_missing_courses(self, seen_course_ids: set[str], seen_at: int) -> None:
         with self._db() as database:
-            for row in database.execute("SELECT id FROM sc_imported_courses WHERE final_imported_at IS NULL AND lifecycle='active'"):
+            for row in database.execute("SELECT id FROM sc_imported_courses WHERE final_imported_at IS NULL AND lifecycle IN ('active', 'scheduled')"):
                 if row["id"] not in seen_course_ids:
                     database.execute("UPDATE sc_imported_courses SET lifecycle='cancelled', retired_at=? WHERE id=?", (seen_at, row["id"]))
 
@@ -160,6 +161,79 @@ class DatabaseManager:
     async def get_unannounced_final_courses(self) -> list[dict]:
         with self._db() as database:
             return [dict(row) for row in database.execute("SELECT * FROM sc_imported_courses WHERE final_imported_at IS NOT NULL AND announced_at IS NULL")]
+
+    async def get_unannounced_completed_seasons(self) -> list[dict]:
+        with self._db() as database:
+            return [dict(row) for row in database.execute("""
+                SELECT season.id, season.name, season.starts_at, season.expires_at
+                FROM sc_imported_seasons season
+                WHERE EXISTS (
+                    SELECT 1 FROM sc_imported_courses course
+                    WHERE course.season_id = season.id AND course.retired_at IS NULL
+                )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM sc_imported_courses course
+                    WHERE course.season_id = season.id
+                      AND course.retired_at IS NULL
+                      AND course.final_imported_at IS NULL
+                )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM sc_season_finish_announcements announcement
+                    WHERE announcement.season_id = season.id
+                      AND announcement.announced_at IS NOT NULL
+                )
+                ORDER BY season.starts_at, season.id
+            """)]
+
+    async def claim_season_finish_announcement(self, season_id: str) -> bool:
+        with self._db() as database:
+            result = database.execute("""
+                INSERT INTO sc_season_finish_announcements (season_id, claimed_at)
+                SELECT ?, ?
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM sc_imported_seasons season
+                    WHERE season.id = ?
+                      AND EXISTS (
+                          SELECT 1 FROM sc_imported_courses course
+                          WHERE course.season_id = season.id AND course.retired_at IS NULL
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM sc_imported_courses course
+                          WHERE course.season_id = season.id
+                            AND course.retired_at IS NULL
+                            AND course.final_imported_at IS NULL
+                      )
+                )
+                ON CONFLICT(season_id) DO UPDATE SET claimed_at = excluded.claimed_at
+                WHERE sc_season_finish_announcements.announced_at IS NULL
+                  AND sc_season_finish_announcements.claimed_at IS NULL
+            """, (season_id, int(time.time()), season_id))
+            return result.rowcount == 1
+
+    async def mark_season_finish_announced(self, season_id: str, channel_id: int, message_id: int) -> None:
+        with self._db() as database:
+            database.execute("""
+                UPDATE sc_season_finish_announcements
+                SET announced_at = ?, claimed_at = NULL, channel_id = ?, message_id = ?
+                WHERE season_id = ?
+            """, (int(time.time()), channel_id, message_id, season_id))
+
+    async def release_season_finish_announcement(self, season_id: str) -> None:
+        with self._db() as database:
+            database.execute("""
+                UPDATE sc_season_finish_announcements
+                SET claimed_at = NULL
+                WHERE season_id = ? AND announced_at IS NULL
+            """, (season_id,))
+
+    async def release_pending_season_finish_announcement_claims(self) -> None:
+        with self._db() as database:
+            database.execute("""
+                UPDATE sc_season_finish_announcements
+                SET claimed_at = NULL
+                WHERE announced_at IS NULL
+            """)
 
     async def get_final_announcement_pages(self, course_id: str) -> set[int]:
         with self._db() as database:
