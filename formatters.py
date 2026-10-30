@@ -306,11 +306,6 @@ class MessageFormatter:
             title=f"🏁 {season['name'][:220]} - Season Complete",
             color=discord.Color.red(),
         )
-        embed.add_field(
-            name="Season dates",
-            value=f"<t:{season['starts_at']}:F> – <t:{season['expires_at']}:F>",
-            inline=False,
-        )
         if not leaderboard:
             return embed
 

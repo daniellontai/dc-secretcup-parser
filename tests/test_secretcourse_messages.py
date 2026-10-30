@@ -53,7 +53,7 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await self.database.get_final_announcement_page_payloads("final"), payloads)
 
-    def test_final_season_embed_has_jka_name_dates_champion_and_first_five(self):
+    def test_final_season_embed_has_jka_name_champion_and_first_five_without_dates(self):
         leaderboard = [
             {"position": 1, "username": "thndr", "total_points": 30},
             {"position": 2, "username": "zielu", "total_points": 25},
@@ -69,12 +69,12 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(embed.title, "🏁 Climb Cup Season 3 - Season Complete")
-        self.assertIn("<t:1:F>", embed.fields[0].value)
-        self.assertIn("<t:100:F>", embed.fields[0].value)
-        self.assertIn("thndr — 30 pts", embed.fields[1].value)
+        self.assertEqual(embed.fields[0].name, "Season champion")
+        self.assertIn("thndr — 30 pts", embed.fields[0].value)
         body = "\n".join(field.value for field in embed.fields)
         self.assertIn("fifth — 16 pts", body)
         self.assertNotIn("sixth", body)
+        self.assertNotIn("<t:", body)
 
     def test_final_season_embed_without_players_omits_champion_and_standings(self):
         embed = MessageFormatter.create_final_season_result_embed(
@@ -82,7 +82,7 @@ class SecretCourseMessageTests(unittest.IsolatedAsyncioTestCase):
             [],
         )
 
-        self.assertEqual([field.name for field in embed.fields], ["Season dates"])
+        self.assertEqual(embed.fields, [])
 
     async def test_final_results_embed_lists_all_players_or_configured_limit(self):
         results = [
