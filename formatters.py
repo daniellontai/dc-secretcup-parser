@@ -301,6 +301,34 @@ class MessageFormatter:
         return embed
 
     @staticmethod
+    def create_final_season_result_embed(season: Dict, leaderboard: List[Dict]) -> discord.Embed:
+        embed = discord.Embed(
+            title=f"🏁 {season['name'][:220]} - Season Complete",
+            color=discord.Color.red(),
+        )
+        embed.add_field(
+            name="Season dates",
+            value=f"<t:{season['starts_at']}:F> – <t:{season['expires_at']}:F>",
+            inline=False,
+        )
+        if not leaderboard:
+            return embed
+
+        champion = leaderboard[0]
+        embed.add_field(
+            name="Season champion",
+            value=f"{champion['username']} — {champion['total_points']} pts",
+            inline=False,
+        )
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = []
+        for row in leaderboard[:5]:
+            marker = medals.get(row["position"], f"{row['position']}.")
+            lines.append(f"{marker} {row['username']} — {row['total_points']} pts")
+        embed.add_field(name="Final top 5", value="\n".join(lines)[:1024], inline=False)
+        return embed
+
+    @staticmethod
     def create_jka_season_standings(season: Dict, leaderboard: List[Dict], top_players: int) -> discord.Embed:
         embed = discord.Embed(title=f"📊 {season['name']} Standings", color=discord.Color.blue())
         if not leaderboard:
